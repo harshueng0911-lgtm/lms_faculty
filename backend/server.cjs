@@ -614,3 +614,69 @@ const server = app.listen(PORT, () => {
 server.setTimeout(2 * 60 * 60 * 1000); // 2 hours in ms
 server.keepAliveTimeout = 65_000;       // slightly above ALB/nginx defaults
 server.headersTimeout   = 66_000;
+//////////////////////////////////////////////////////
+// 🔐 FACULTY PASSWORD RESET (for dummy emails)
+//////////////////////////////////////////////////////
+
+app.post("/reset-password", async (req, res) => {
+  try {
+    const { email, newPassword } = req.body;
+
+    if (!email || !newPassword) {
+      return res.status(400).json({
+        error: "Email and new password are required",
+      });
+    }
+
+    if (newPassword.length < 6) {
+      return res.status(400).json({
+        error: "Password must be at least 6 characters",
+      });
+    }
+
+    // Find auth user by email
+    const { data: usersData, error: usersError } =
+      await supabase.auth.admin.listUsers();
+
+    if (usersError) {
+      console.error("List users error:", usersError.message);
+      return res.status(500).json({
+        error: usersError.message,
+      });
+    }
+
+    const user = usersData.users.find(
+      (u) => u.email?.toLowerCase() === email.toLowerCase()
+    );
+
+    if (!user) {
+      return res.status(404).json({
+        error: "Faculty account not found",
+      });
+    }
+
+    // Update password
+    const { error: updateError } =
+      await supabase.auth.admin.updateUserById(user.id, {
+        password: newPassword,
+      });
+
+    if (updateError) {
+      console.error("Password update error:", updateError.message);
+      return res.status(500).json({
+        error: updateError.message,
+      });
+    }
+
+    return res.status(200).json({
+      success: true,
+      message: "Password updated successfully",
+    });
+  } catch (err) {
+    console.error("RESET PASSWORD ERROR:", err.message);
+
+    return res.status(500).json({
+      error: "Internal server error",
+    });
+  }
+});
