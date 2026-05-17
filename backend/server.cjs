@@ -4,6 +4,7 @@ const multer = require("multer");
 const fs = require("fs");
 const path = require("path");
 const https = require("https");
+const { v4: uuidv4 } = require("uuid");
 const { google } = require("googleapis");
 const { createClient } = require("@supabase/supabase-js");
 require("dotenv").config();
@@ -15,140 +16,7 @@ console.log("=== SERVER STARTUP ===");
 app.use(cors());
 
 //////////////////////////////////////////////////////
-// 🔀 YOUTUBE — Proxy chunk upload  ← MUST be before express.json()
-//
-// WHY FIRST:
-//   express.json() and express.raw() are global body-parsers that
-//   buffer the entire request body into RAM.  For a 64 MB binary
-//   chunk that means ~128 MB per request (double-copy).  By
-//   registering this route before any body-parser middleware the
-//   request stream arrives untouched and we pipe it straight to
-//   YouTube — zero buffering, zero extra RAM.
-//////////////////////////////////////////////////////
-
-app.post("/proxy-youtube-chunk", (req, res) => {
-  const uploadUrl    = req.headers["x-upload-url"];
-  const contentRange = req.headers["x-content-range"];
-  const contentType  = req.headers["content-type"] || "application/octet-stream";
-
-  if (!uploadUrl) {
-    return res.status(400).json({ error: "x-upload-url header is required" });
-  }
-  if (!contentRange) {
-    return res.status(400).json({ error: "x-content-range header is required" });
-  }
-
-  // ── Resume-query requests (bytes */TOTAL) carry no body ─────────────────
-  // YouTube responds 308 with a Range header telling us the confirmed offset,
-  // or 200/201 if the upload is already complete.
-  const isResumeQuery = contentRange.startsWith("bytes */");
-
-  console.log(`📤 Proxying chunk: ${contentRange}${isResumeQuery ? " [resume query]" : ""}`);
-
-  let parsedUrl;
-  try {
-    parsedUrl = new URL(uploadUrl);
-  } catch {
-    return res.status(400).json({ error: "Invalid x-upload-url value" });
-  }
-
-  // Build headers forwarded to YouTube
-  const forwardHeaders = {
-    "Content-Type":  contentType,
-    "Content-Range": contentRange,
-  };
-
-  // For real chunk uploads Content-Length must be set so YouTube knows the
-  // chunk size without buffering.  For resume queries there is no body.
-  const rawContentLength = req.headers["content-length"];
-  if (!isResumeQuery && rawContentLength) {
-    forwardHeaders["Content-Length"] = rawContentLength;
-  } else if (isResumeQuery) {
-    forwardHeaders["Content-Length"] = "0";
-  }
-
-  const options = {
-    hostname: parsedUrl.hostname,
-    port:     443,
-    path:     parsedUrl.pathname + parsedUrl.search,
-    method:   "PUT",
-    headers:  forwardHeaders,
-  };
-
-  const ytReq = https.request(options, (ytRes) => {
-    const status = ytRes.statusCode;
-
-    // Forward headers the frontend needs
-    const rangeHeader    = ytRes.headers["range"];
-    const locationHeader = ytRes.headers["location"];
-    if (rangeHeader)    res.setHeader("Range", rangeHeader);
-    if (locationHeader) res.setHeader("Location", locationHeader);
-
-    // ── 308 Resume Incomplete — chunk accepted, more chunks expected ───────
-    if (status === 308) {
-      console.log(`✅ Chunk accepted — range: ${rangeHeader || "none"}`);
-      // Consume and discard YouTube's (empty) response body, then reply
-      ytRes.resume();
-      ytRes.on("end", () => res.status(308).end());
-      return;
-    }
-
-    // ── 200 / 201 — upload complete, YouTube returns video metadata ────────
-    if (status === 200 || status === 201) {
-      let body = "";
-      ytRes.setEncoding("utf8");
-      ytRes.on("data", (chunk) => { body += chunk; });
-      ytRes.on("end", () => {
-        try {
-          const data = JSON.parse(body);
-          console.log(`✅ Upload complete — videoId: ${data.id}`);
-          return res.status(200).json(data);
-        } catch {
-          return res.status(500).json({ error: "YouTube returned non-JSON on completion", raw: body });
-        }
-      });
-      return;
-    }
-
-    // ── Any other status — forward error text back to client ───────────────
-    let errBody = "";
-    ytRes.setEncoding("utf8");
-    ytRes.on("data", (c) => { errBody += c; });
-    ytRes.on("end", () => {
-      console.error(`YouTube chunk error HTTP ${status}:`, errBody);
-      if (!res.headersSent) res.status(status).send(errBody);
-    });
-  });
-
-  ytReq.on("error", (err) => {
-    console.error("PROXY CHUNK NETWORK ERROR:", err.message);
-    if (!res.headersSent) res.status(502).json({ error: err.message });
-  });
-
-  ytReq.on("timeout", () => {
-    ytReq.destroy();
-    if (!res.headersSent) res.status(504).json({ error: "YouTube request timed out" });
-  });
-
-  ytReq.setTimeout(10 * 60 * 1000); // 10 min per chunk
-
-  if (isResumeQuery) {
-    // Resume queries have no body — just end the request immediately
-    ytReq.end();
-  } else {
-    // ✅ THE KEY FIX: pipe the raw incoming stream straight to YouTube.
-    //    No buffering.  No RAM spike.  Handles any file size.
-    req.pipe(ytReq);
-
-    req.on("error", (err) => {
-      console.error("Client stream error:", err.message);
-      ytReq.destroy();
-    });
-  }
-});
-
-//////////////////////////////////////////////////////
-// Body parsers — applied AFTER the chunk proxy route
+// Body parsers
 //////////////////////////////////////////////////////
 
 app.use(express.json());
@@ -195,28 +63,32 @@ const drive = google.drive({
 });
 
 //////////////////////////////////////////////////////
-// 🔐 YOUTUBE AUTH
+// 🔐 BUNNY STORAGE CONFIG
 //////////////////////////////////////////////////////
 
-const youtubeOAuth2Client = new google.auth.OAuth2(
-  process.env.YOUTUBE_CLIENT_ID,
-  process.env.YOUTUBE_CLIENT_SECRET,
-  "https://developers.google.com/oauthplayground"
-);
+const BUNNY_STORAGE_ZONE     = process.env.BUNNY_STORAGE_ZONE;     // osmania-lms-videos
+const BUNNY_STORAGE_HOST     = process.env.BUNNY_STORAGE_HOST;     // sg.storage.bunnycdn.com
+const BUNNY_STORAGE_PASSWORD = process.env.BUNNY_STORAGE_PASSWORD;
+const BUNNY_CDN_URL          = process.env.BUNNY_CDN_URL;          // https://osmania-lms-cdn.b-cdn.net
 
-youtubeOAuth2Client.setCredentials({
-  refresh_token: process.env.YOUTUBE_REFRESH_TOKEN,
+//////////////////////////////////////////////////////
+// 🔗 Persistent HTTPS agent for Bunny Storage
+// Keeps TCP connections alive between requests so each
+// upload doesn't pay the TLS handshake cost again.
+//////////////////////////////////////////////////////
+
+const bunnyAgent = new https.Agent({
+  keepAlive:            true,
+  keepAliveMsecs:       10_000,
+  maxSockets:           8,      // up to 8 parallel connections to Bunny
+  maxFreeSockets:       4,
+  scheduling:           "lifo",
+  timeout:              0,      // no socket idle timeout
 });
 
 //////////////////////////////////////////////////////
 // 🛠️ HELPERS
 //////////////////////////////////////////////////////
-
-async function getYouTubeAccessToken() {
-  const { token } = await youtubeOAuth2Client.getAccessToken();
-  if (!token) throw new Error("Failed to obtain YouTube access token");
-  return token;
-}
 
 async function uploadToDrive(file) {
   const fileMetadata = {
@@ -265,15 +137,16 @@ app.get("/", (req, res) => {
   res.json({
     status: "running",
     env: {
-      GOOGLE_CLIENT_ID:        !!process.env.GOOGLE_CLIENT_ID,
-      GOOGLE_CLIENT_SECRET:    !!process.env.GOOGLE_CLIENT_SECRET,
-      GOOGLE_REFRESH_TOKEN:    !!process.env.GOOGLE_REFRESH_TOKEN,
-      GOOGLE_DRIVE_FOLDER_ID:  !!process.env.GOOGLE_DRIVE_FOLDER_ID,
-      YOUTUBE_CLIENT_ID:       !!process.env.YOUTUBE_CLIENT_ID,
-      YOUTUBE_CLIENT_SECRET:   !!process.env.YOUTUBE_CLIENT_SECRET,
-      YOUTUBE_REFRESH_TOKEN:   !!process.env.YOUTUBE_REFRESH_TOKEN,
-      SUPABASE_URL:            !!process.env.SUPABASE_URL,
-      SUPABASE_SERVICE_KEY:    !!process.env.SUPABASE_SERVICE_KEY,
+      GOOGLE_CLIENT_ID:       !!process.env.GOOGLE_CLIENT_ID,
+      GOOGLE_CLIENT_SECRET:   !!process.env.GOOGLE_CLIENT_SECRET,
+      GOOGLE_REFRESH_TOKEN:   !!process.env.GOOGLE_REFRESH_TOKEN,
+      GOOGLE_DRIVE_FOLDER_ID: !!process.env.GOOGLE_DRIVE_FOLDER_ID,
+      SUPABASE_URL:           !!process.env.SUPABASE_URL,
+      SUPABASE_SERVICE_KEY:   !!process.env.SUPABASE_SERVICE_KEY,
+      BUNNY_STORAGE_ZONE:     !!process.env.BUNNY_STORAGE_ZONE,
+      BUNNY_STORAGE_HOST:     !!process.env.BUNNY_STORAGE_HOST,
+      BUNNY_STORAGE_PASSWORD: !!process.env.BUNNY_STORAGE_PASSWORD,
+      BUNNY_CDN_URL:          !!process.env.BUNNY_CDN_URL,
     },
   });
 });
@@ -287,128 +160,321 @@ app.get("/test-drive", async (req, res) => {
   }
 });
 
-app.get("/test-youtube", async (req, res) => {
-  try {
-    const token = await getYouTubeAccessToken();
-    res.json({ ok: true, accessTokenWorking: !!token });
-  } catch (err) {
-    res.status(500).json({ ok: false, error: err.message });
+//////////////////////////////////////////////////////
+// 🎬 BUNNY STORAGE — Streaming proxy upload
+//
+// POST /upload-video
+//
+// The browser sends the raw MP4 directly to this endpoint as
+// multipart/form-data (using multer disk storage). Node then
+// streams the file to Bunny Storage using a persistent HTTPS
+// agent — no RAM buffering, no base64, pure pipe().
+//
+// Why proxy instead of direct browser → Bunny PUT?
+//   • The Bunny Storage password never reaches the browser
+//   • Node's TCP stack saturates the uplink far better than a
+//     single browser XHR to a distant region (Singapore)
+//   • Progress is tracked server-side and streamed back via
+//     SSE on a separate endpoint (/upload-video-progress/:id)
+//   • In local dev the browser → localhost hop is effectively
+//     free, so the only real bottleneck is localhost → Bunny
+//
+// Flow:
+//   1. Browser POSTs file + metadata here (multipart)
+//   2. Server streams file → Bunny Storage via persistent agent
+//   3. Server saves metadata to Supabase
+//   4. Returns { cdnUrl, filePath }
+//
+// Body fields: file (MP4), faculty_id, faculty_name, department,
+//              year, semester, subject, unit, title
+//////////////////////////////////////////////////////
+
+// Multer config for video — no size limit enforced here (validated
+// on the frontend); multer just writes to disk as it streams in.
+const videoUpload = multer({
+  dest:   "uploads/",
+  limits: { fileSize: 7 * 1024 * 1024 * 1024 }, // 7 GB hard cap
+});
+
+// In-memory progress store: uploadId → { loaded, total, done, error }
+const progressStore = new Map();
+
+// Clean up stale progress entries after 10 minutes
+setInterval(() => {
+  const cutoff = Date.now() - 10 * 60 * 1000;
+  for (const [id, entry] of progressStore.entries()) {
+    if (entry.startedAt < cutoff) progressStore.delete(id);
   }
+}, 60_000);
+
+//////////////////////////////////////////////////////
+// GET /upload-video-progress/:uploadId
+// Server-Sent Events endpoint — frontend polls this for
+// real-time upload progress while the proxy streams to Bunny.
+//////////////////////////////////////////////////////
+
+app.get("/upload-video-progress/:uploadId", (req, res) => {
+  const { uploadId } = req.params;
+
+  res.setHeader("Content-Type",  "text/event-stream");
+  res.setHeader("Cache-Control", "no-cache");
+  res.setHeader("Connection",    "keep-alive");
+  res.flushHeaders();
+
+  const send = (data) => {
+    if (!res.writableEnded) res.write(`data: ${JSON.stringify(data)}\n\n`);
+  };
+
+  const interval = setInterval(() => {
+    const entry = progressStore.get(uploadId);
+    if (!entry) { send({ status: "waiting" }); return; }
+
+    send({
+      status:  entry.error ? "error"   :
+               entry.done  ? "done"    : "uploading",
+      loaded:  entry.loaded,
+      total:   entry.total,
+      error:   entry.error || null,
+      cdnUrl:  entry.cdnUrl || null,
+    });
+
+    if (entry.done || entry.error) {
+      clearInterval(interval);
+      res.end();
+    }
+  }, 300); // send update every 300 ms
+
+  req.on("close", () => clearInterval(interval));
 });
 
 //////////////////////////////////////////////////////
-// 🚀 YOUTUBE — Create resumable upload session
+// POST /upload-video — main streaming proxy
 //////////////////////////////////////////////////////
 
-app.post("/create-youtube-upload-session", async (req, res) => {
-  try {
-    const {
-      title,
-      description = "",
-      tags = [],
-      fileSize,
-      mimeType = "video/*",
-    } = req.body;
+app.post(
+  "/upload-video",
+  videoUpload.single("file"),
+  async (req, res) => {
+    // multer has already written the file to disk by the time we get here
+    const tempPath = req.file?.path;
 
-    if (!title || !fileSize) {
-      return res.status(400).json({ error: "title and fileSize are required" });
-    }
-
-    const accessToken = await getYouTubeAccessToken();
-
-    const initResponse = await fetch(
-      "https://www.googleapis.com/upload/youtube/v3/videos?uploadType=resumable&part=snippet,status",
-      {
-        method: "POST",
-        headers: {
-          Authorization:            `Bearer ${accessToken}`,
-          "Content-Type":           "application/json",
-          "X-Upload-Content-Length": fileSize.toString(),
-          "X-Upload-Content-Type":  mimeType,
-        },
-        body: JSON.stringify({
-          snippet: {
-            title,
-            description,
-            tags,
-            categoryId: "27",
-          },
-          status: {
-            privacyStatus:              "unlisted",
-            selfDeclaredMadeForKids:    false,
-          },
-        }),
+    const cleanup = () => {
+      if (tempPath && fs.existsSync(tempPath)) {
+        try { fs.unlinkSync(tempPath); } catch (_) {}
       }
-    );
+    };
 
-    if (!initResponse.ok) {
-      const errText = await initResponse.text();
-      console.error("YouTube init error:", errText);
-      return res
-        .status(500)
-        .json({ error: "YouTube rejected the upload session", detail: errText });
+    try {
+      if (!req.file) {
+        return res.status(400).json({ error: "No file received." });
+      }
+
+      // ── validate MIME / extension ──────────────────────────
+      const originalName = req.file.originalname || "";
+      const isMP4 =
+        req.file.mimetype === "video/mp4" ||
+        originalName.toLowerCase().endsWith(".mp4");
+
+      if (!isMP4) {
+        cleanup();
+        return res.status(400).json({ error: "Only MP4 files are accepted." });
+      }
+
+      if (
+        !BUNNY_STORAGE_ZONE ||
+        !BUNNY_STORAGE_HOST ||
+        !BUNNY_STORAGE_PASSWORD ||
+        !BUNNY_CDN_URL
+      ) {
+        cleanup();
+        return res.status(500).json({ error: "Bunny Storage not configured." });
+      }
+
+      // ── build storage path ─────────────────────────────────
+      const safeName = path.basename(originalName).replace(/[^a-zA-Z0-9._\-]/g, "_");
+      const fileId   = uuidv4();
+      const filePath = `videos/${fileId}-${safeName}`;
+      const cdnUrl   = `${BUNNY_CDN_URL}/${filePath}`;
+
+      // ── register progress entry ────────────────────────────
+      const uploadId  = fileId; // reuse uuid as the progress key
+      const fileSize  = req.file.size;
+
+      progressStore.set(uploadId, {
+        loaded:    0,
+        total:     fileSize,
+        done:      false,
+        error:     null,
+        cdnUrl:    null,
+        startedAt: Date.now(),
+      });
+
+      // ── respond immediately with uploadId + cdnUrl ─────────
+      // The frontend can start polling /upload-video-progress/:uploadId
+      // while the actual Bunny transfer happens asynchronously below.
+      res.json({ uploadId, cdnUrl, filePath });
+
+      // ── stream file → Bunny Storage (async, after response) ─
+      const bunnyPath = `/${BUNNY_STORAGE_ZONE}/${filePath}`;
+      const fileStream = fs.createReadStream(tempPath, {
+        highWaterMark: 512 * 1024, // 512 KB read chunks
+      });
+
+      const bunnyReq = https.request(
+        {
+          hostname: BUNNY_STORAGE_HOST,
+          path:     bunnyPath,
+          method:   "PUT",
+          agent:    bunnyAgent,
+          headers:  {
+            AccessKey:       BUNNY_STORAGE_PASSWORD,
+            "Content-Type":  "video/mp4",
+            "Content-Length": fileSize,
+          },
+        },
+        (bunnyRes) => {
+          let body = "";
+          bunnyRes.on("data", (d) => { body += d; });
+          bunnyRes.on("end", async () => {
+            const ok = bunnyRes.statusCode === 201 || bunnyRes.statusCode === 200;
+
+            if (!ok) {
+              console.error(`[Bunny] PUT failed — HTTP ${bunnyRes.statusCode}:`, body);
+              progressStore.set(uploadId, {
+                ...progressStore.get(uploadId),
+                error: `Bunny rejected upload (HTTP ${bunnyRes.statusCode}).`,
+              });
+              cleanup();
+              return;
+            }
+
+            console.log(`[Bunny] ✅ Upload complete: ${filePath}`);
+
+            // ── save metadata to Supabase ──────────────────
+            try {
+              const {
+                faculty_id, faculty_name, department,
+                year, semester, subject, unit, title,
+              } = req.body;
+
+              const { error: dbErr } = await supabase.from("videos").insert([{
+                faculty_id,
+                faculty_name: faculty_name || (await getFacultyName(faculty_id)),
+                department,
+                year:       Number(year),
+                semester:   semester ? Number(semester) : null,
+                subject,
+                unit,
+                title,
+                file_id:    filePath,
+                embed_url:  cdnUrl,
+                created_at: new Date().toISOString(),
+              }]);
+
+              if (dbErr) throw dbErr;
+
+              progressStore.set(uploadId, {
+                ...progressStore.get(uploadId),
+                loaded:  fileSize,
+                done:    true,
+                cdnUrl,
+              });
+
+              console.log("✅ Metadata saved:", filePath);
+            } catch (dbError) {
+              console.error("METADATA SAVE ERROR:", dbError.message);
+              progressStore.set(uploadId, {
+                ...progressStore.get(uploadId),
+                error: "Upload succeeded but metadata save failed: " + dbError.message,
+              });
+            }
+
+            cleanup();
+          });
+        }
+      );
+
+      bunnyReq.on("error", (err) => {
+        console.error("[Bunny] Stream error:", err.message);
+        progressStore.set(uploadId, {
+          ...progressStore.get(uploadId),
+          error: "Network error while uploading to Bunny: " + err.message,
+        });
+        cleanup();
+      });
+
+      // Track bytes written to Bunny so progress SSE works
+      let bytesWritten = 0;
+      fileStream.on("data", (chunk) => {
+        bytesWritten += chunk.length;
+        const entry = progressStore.get(uploadId);
+        if (entry && !entry.done && !entry.error) {
+          progressStore.set(uploadId, { ...entry, loaded: bytesWritten });
+        }
+      });
+
+      fileStream.on("error", (err) => {
+        console.error("[FileStream] read error:", err.message);
+        progressStore.set(uploadId, {
+          ...progressStore.get(uploadId),
+          error: "Failed to read temp file: " + err.message,
+        });
+        bunnyReq.destroy();
+        cleanup();
+      });
+
+      // Pipe the local temp file straight into the Bunny PUT request
+      fileStream.pipe(bunnyReq);
+
+    } catch (err) {
+      console.error("UPLOAD-VIDEO ERROR:", err.message);
+      cleanup();
+      // Response may already be sent (uploadId response) so guard carefully
+      if (!res.headersSent) {
+        res.status(500).json({ error: err.message });
+      }
     }
-
-    const uploadUrl = initResponse.headers.get("location");
-
-    if (!uploadUrl) {
-      return res.status(500).json({ error: "YouTube did not return an upload URL" });
-    }
-
-    console.log("✅ YouTube resumable session created");
-    return res.json({ uploadUrl });
-  } catch (error) {
-    console.error("CREATE YOUTUBE SESSION ERROR:", error.message);
-    return res.status(500).json({ error: error.message });
   }
-});
+);
 
 //////////////////////////////////////////////////////
-// 💾 YOUTUBE — Save video metadata
+// 💾 SAVE VIDEO METADATA (kept for backward compat)
+// This is now called internally by /upload-video after
+// the Bunny transfer completes. Exposed externally only
+// if you need a manual retry path.
 //////////////////////////////////////////////////////
 
 app.post("/save-video-metadata", async (req, res) => {
   try {
     const {
-      videoId,
+      filePath, cdnUrl, faculty_id, faculty_name,
+      department, year, semester, subject, unit, title,
+    } = req.body;
+
+    if (!filePath || !cdnUrl || !faculty_id || !title) {
+      return res.status(400).json({
+        error: "filePath, cdnUrl, faculty_id, and title are required",
+      });
+    }
+
+    const { error } = await supabase.from("videos").insert([{
       faculty_id,
-      faculty_name,
+      faculty_name: faculty_name || (await getFacultyName(faculty_id)),
       department,
-      year,
-      semester,
+      year:       Number(year),
+      semester:   semester ? Number(semester) : null,
       subject,
       unit,
       title,
-    } = req.body;
-
-    if (!videoId || !faculty_id || !title) {
-      return res
-        .status(400)
-        .json({ error: "videoId, faculty_id, and title are required" });
-    }
-
-    const embedUrl = `https://www.youtube.com/embed/${videoId}`;
-
-    const { error } = await supabase.from("videos").insert([
-      {
-        faculty_id,
-        faculty_name: faculty_name || (await getFacultyName(faculty_id)),
-        department,
-        year:         Number(year),
-        semester:     Number(semester),
-        subject,
-        unit,
-        title,
-        file_id:      videoId,
-        embed_url:    embedUrl,
-        created_at:   new Date().toISOString(),
-      },
-    ]);
+      file_id:    filePath,
+      embed_url:  cdnUrl,
+      created_at: new Date().toISOString(),
+    }]);
 
     if (error) throw error;
 
-    console.log("✅ Video metadata saved:", videoId);
-    return res.status(200).json({ success: true, embedUrl });
+    console.log("✅ Video metadata saved:", filePath);
+    return res.status(200).json({ success: true, cdnUrl });
   } catch (error) {
     console.error("SAVE METADATA ERROR:", error.message);
     return res.status(500).json({ error: error.message });
@@ -416,7 +482,7 @@ app.post("/save-video-metadata", async (req, res) => {
 });
 
 //////////////////////////////////////////////////////
-// 🎯 UPLOAD CONTENT — PDFs only
+// 🎯 UPLOAD CONTENT — PDFs only (UNCHANGED)
 //////////////////////////////////////////////////////
 
 app.post("/upload-content", upload.single("file"), async (req, res) => {
@@ -433,8 +499,7 @@ app.post("/upload-content", upload.single("file"), async (req, res) => {
     if (type === "video") {
       fs.unlinkSync(req.file.path);
       return res.status(400).json({
-        error:
-          "Video uploads are not handled here. Use /create-youtube-upload-session instead.",
+        error: "Video uploads are not handled here. Use /upload-video instead.",
       });
     }
 
@@ -452,7 +517,7 @@ app.post("/upload-content", upload.single("file"), async (req, res) => {
           faculty_name,
           department,
           year:     Number(year),
-          semester: Number(semester),
+          semester: semester ? Number(semester) : null,
           subject,
           unit,
           title,
@@ -478,7 +543,7 @@ app.post("/upload-content", upload.single("file"), async (req, res) => {
 });
 
 //////////////////////////////////////////////////////
-// 📊 ASSESSMENT UPLOAD
+// 📊 ASSESSMENT UPLOAD (UNCHANGED)
 //////////////////////////////////////////////////////
 
 app.post("/upload-assessment", upload.single("file"), async (req, res) => {
@@ -501,7 +566,7 @@ app.post("/upload-assessment", upload.single("file"), async (req, res) => {
         faculty_name,
         department,
         year:     Number(year),
-        semester: Number(semester),
+        semester: semester ? Number(semester) : null,
         subject,
         unit,
         title,
@@ -522,12 +587,12 @@ app.post("/upload-assessment", upload.single("file"), async (req, res) => {
 });
 
 //////////////////////////////////////////////////////
-// 📈 Memory monitor — warns in logs before OOM crash
+// 📈 Memory monitor
 //////////////////////////////////////////////////////
 
 setInterval(() => {
   const mb = process.memoryUsage().rss / 1024 / 1024;
-  if (mb > 200) {
+  if (mb > 400) {
     console.warn(`⚠️  High RSS memory: ${mb.toFixed(0)} MB`);
   }
 }, 10_000);
@@ -537,6 +602,15 @@ setInterval(() => {
 //////////////////////////////////////////////////////
 
 const PORT = process.env.PORT || 5000;
-app.listen(PORT, () => {
+
+// Large body timeout — essential for 6 GB uploads.
+// expressTimeout is set per-request via server.setTimeout below.
+const server = app.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`);
 });
+
+// Allow up to 2 hours for a single request (covers very large files
+// on slow connections). Express's default is 2 minutes.
+server.setTimeout(2 * 60 * 60 * 1000); // 2 hours in ms
+server.keepAliveTimeout = 65_000;       // slightly above ALB/nginx defaults
+server.headersTimeout   = 66_000;

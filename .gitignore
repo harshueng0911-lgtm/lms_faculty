@@ -24,3 +24,12 @@ dist-ssr
 *.sw?
 backend/token.json
 backend/.env
+backend/youtube_client.json
+backend/generate-youtube-token.js
+backend/package-lock.json
+backend/package.json
+src/.env
+src/youtube_client.json
+src/generate-youtube-token.js
+src/package-lock.json
+src/package.json
