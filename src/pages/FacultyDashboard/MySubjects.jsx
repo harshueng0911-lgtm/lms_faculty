@@ -65,37 +65,37 @@ export default function MySubjects() {
     ]);
 
     const allContent = [
-      ...videos.map((i) => ({ ...i, type: "video" })),
-      ...pdfs.map((i) => ({ ...i, type: "pdf" })),
-      ...assessments.map((i) => ({ ...i, type: "assessment" })),
+      ...videos.map((item) => ({ ...item, type: "video" })),
+      ...pdfs.map((item) => ({ ...item, type: "pdf" })),
+      ...assessments.map((item) => ({ ...item, type: "assessment" })),
     ];
 
     const grouped = {};
 
-    allContent.forEach((i) => {
-      const subject = i.subject || "Unknown Subject";
-      const year = String(i.year);
-      const semester = normalizeSemester(i.semester);
+    allContent.forEach((item) => {
+      const subject = (item.subject || "Unknown Subject").trim();
+      const year = String(item.year || "");
+      const semester = normalizeSemester(item.semester);
 
       const key =
         year === "1"
-          ? `1__${subject}`
-          : `${year}__${semester}__${subject}`;
+          ? `${subject}__1`
+          : `${subject}__${year}__${semester}`;
 
       if (!grouped[key]) {
         grouped[key] = {
           subject,
           year,
-          semester: year === "1" ? null : semester,
+          semester,
           videos: 0,
           notes: 0,
           assessments: 0,
         };
       }
 
-      if (i.type === "video") grouped[key].videos += 1;
-      if (i.type === "pdf") grouped[key].notes += 1;
-      if (i.type === "assessment") grouped[key].assessments += 1;
+      if (item.type === "video") grouped[key].videos += 1;
+      if (item.type === "pdf") grouped[key].notes += 1;
+      if (item.type === "assessment") grouped[key].assessments += 1;
     });
 
     return Object.values(grouped);
@@ -124,8 +124,8 @@ export default function MySubjects() {
 
       setFaculty(facultyData);
 
-      const grouped = await fetchAndGroup(facultyData.id);
-      setAllSubjects(grouped);
+      const groupedSubjects = await fetchAndGroup(facultyData.id);
+      setAllSubjects(groupedSubjects);
     } catch (err) {
       console.error("Load subjects error:", err);
     } finally {
@@ -146,12 +146,12 @@ export default function MySubjects() {
       if (selectedFilter === "1") {
         result = result.filter((item) => String(item.year) === "1");
       } else {
-        const [filterYear, filterSemester] = selectedFilter.split("-");
+        const [year, semester] = selectedFilter.split("-");
 
         result = result.filter(
           (item) =>
-            String(item.year) === filterYear &&
-            String(item.semester) === filterSemester
+            String(item.year) === year &&
+            String(item.semester) === semester
         );
       }
     }
@@ -159,22 +159,22 @@ export default function MySubjects() {
     setFilteredSubjects(result);
   };
 
-  const getItemKey = (item) =>
-    String(item.year) === "1"
-      ? `1__${item.subject}`
-      : `${item.year}__${item.semester}__${item.subject}`;
-
   const getYearLabel = (item) => {
     if (String(item.year) === "1") return "1st Year";
     if (String(item.year) === "2") return `2nd Year — Semester ${item.semester}`;
     if (String(item.year) === "3") return `3rd Year — Semester ${item.semester}`;
     if (String(item.year) === "4") return `4th Year — Semester ${item.semester}`;
-    return `Year ${item.year}`;
+    return "Academic Content";
   };
+
+  const getItemKey = (item) =>
+    String(item.year) === "1"
+      ? `${item.subject}__1`
+      : `${item.subject}__${item.year}__${item.semester}`;
 
   const deleteSubject = async (item) => {
     const confirmed = window.confirm(
-      `Delete ALL content for "${item.subject}" (${getYearLabel(item)})?`
+      `Delete all content for "${item.subject}" (${getYearLabel(item)})?`
     );
 
     if (!confirmed) return;
@@ -191,7 +191,7 @@ export default function MySubjects() {
       const subject = item.subject;
       const year = Number(item.year);
 
-      const deleteFrom = async (table) => {
+      const deleteFromTable = async (table) => {
         let query = supabase
           .from(table)
           .delete()
@@ -200,21 +200,23 @@ export default function MySubjects() {
           .eq("year", year);
 
         if (year === 1) {
-          await query.is("semester", null);
+          const { error } = await query.is("semester", null);
+          if (error) throw error;
         } else {
-          await query.eq("semester", Number(item.semester));
+          const { error } = await query.eq("semester", Number(item.semester));
+          if (error) throw error;
         }
       };
 
-      await deleteFrom("videos");
-      await deleteFrom("pdfs");
-      await deleteFrom("assessments");
+      await deleteFromTable("videos");
+      await deleteFromTable("pdfs");
+      await deleteFromTable("assessments");
 
       setAllSubjects((prev) =>
         prev.filter((subjectItem) => getItemKey(subjectItem) !== key)
       );
     } catch (err) {
-      console.error(err);
+      console.error("Delete failed:", err);
       alert("Delete failed");
       loadSubjects();
     } finally {
@@ -230,6 +232,7 @@ export default function MySubjects() {
       "from-green-500 to-green-600",
       "from-pink-500 to-pink-600",
       "from-purple-500 to-purple-600",
+      "from-orange-500 to-orange-600",
     ];
 
     let hash = 0;
@@ -281,13 +284,13 @@ export default function MySubjects() {
               placeholder="Search subjects..."
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              className="flex-1 px-4 py-3 border rounded-xl bg-white"
+              className="flex-1 px-4 py-3 border rounded-xl bg-white outline-none focus:ring-2 focus:ring-blue-500"
             />
 
             <select
               value={selectedFilter}
               onChange={(e) => setSelectedFilter(e.target.value)}
-              className="px-4 py-3 border rounded-xl bg-white"
+              className="px-4 py-3 border rounded-xl bg-white outline-none focus:ring-2 focus:ring-blue-500"
             >
               <option value="All">All Years</option>
               <option value="1">1st Year</option>
@@ -301,11 +304,11 @@ export default function MySubjects() {
           </div>
 
           {loading ? (
-            <div className="bg-white rounded-2xl p-10 text-center">
+            <div className="bg-white rounded-2xl p-10 text-center border shadow-sm">
               Loading subjects...
             </div>
           ) : filteredSubjects.length === 0 ? (
-            <div className="bg-white rounded-2xl p-10 text-center">
+            <div className="bg-white rounded-2xl p-10 text-center border shadow-sm">
               No subjects found
             </div>
           ) : (
@@ -321,7 +324,7 @@ export default function MySubjects() {
                     <button
                       onClick={() => deleteSubject(item)}
                       disabled={deletingKey === key}
-                      className="absolute top-3 right-3 z-50 w-9 h-9 rounded-full bg-red-500 text-white flex items-center justify-center"
+                      className="absolute top-3 right-3 z-50 w-9 h-9 rounded-full bg-red-500 text-white flex items-center justify-center hover:bg-red-600"
                     >
                       <Trash2 size={16} />
                     </button>
@@ -331,7 +334,7 @@ export default function MySubjects() {
                         item.subject
                       )} h-40 flex items-center justify-center`}
                     >
-                      <div className="text-center text-white">
+                      <div className="text-center text-white px-4">
                         <div className="text-5xl mb-3">📚</div>
                         <h2 className="text-2xl font-bold capitalize">
                           {item.subject}
@@ -341,7 +344,7 @@ export default function MySubjects() {
                     </div>
 
                     <div className="p-6">
-                      <div className="space-y-2 mb-6 text-sm">
+                      <div className="space-y-2 mb-6 text-sm text-gray-700">
                         <div>🎥 {item.videos} Videos</div>
                         <div>📄 {item.notes} Lecture Notes</div>
                         <div>📝 {item.assessments} Assessments</div>
@@ -349,7 +352,7 @@ export default function MySubjects() {
 
                       <button
                         onClick={() => openDetails(item)}
-                        className="w-full px-5 py-3 bg-blue-600 text-white rounded-xl hover:bg-blue-700"
+                        className="w-full px-5 py-3 bg-blue-600 text-white rounded-xl hover:bg-blue-700 font-semibold"
                       >
                         Open Details
                       </button>
