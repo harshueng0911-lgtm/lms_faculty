@@ -627,7 +627,7 @@ function UnifiedUploadForm({ faculty, prefill }) {
 
   const phaseLabel = {
     sending: "⚡ Sending to server…",
-    uploading: `📤 Uploading to Bunny CDN — ${progressPct}%`,
+    uploading: `📤 Uploading — ${progressPct}%`,
     saving: "💾 Saving metadata…",
     done: "✅ Done!",
   };
