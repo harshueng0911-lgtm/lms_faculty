@@ -3,7 +3,7 @@ import { useNavigate } from "react-router-dom";
 
 import viceChancellorImg from "../../assets/images/vice-chancellor.png";
 import principalImg from "../../assets/images/principal_1.png";
-import oueng from "../../assets/images/OU_eng.png";
+import oueng from "../../assets/images/ou-campus.png";
 import oulogo from "../../assets/images/Eng_college_log.png";
 import student from "../../assets/images/students.png";
 import facul from "../../assets/images/faculty.png";

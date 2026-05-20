@@ -14,6 +14,7 @@ import {
   ExternalLink,
   Download,
   ChevronDown,
+  Plus,
 } from "lucide-react";
 
 import { supabase } from "../../lib/supabaseClient";
@@ -25,21 +26,13 @@ const UNIT_PALETTE = [
   { badgeBg: "bg-[#FFF3E2]", badgeText: "text-[#9A4B00]", border: "border-[#F3DEC4]" },
 ];
 
-/**
- * Determines whether a URL is a Bunny Stream embed URL.
- */
 const isBunnyEmbed = (url) =>
   url && (url.includes("iframe.mediadelivery.net") || url.includes("bunnycdn.com"));
 
-/**
- * Cleans a YouTube embed URL — only called when the URL is actually YouTube.
- * Uses youtube-nocookie.com to reduce tracking and suggested content.
- */
 const cleanYouTubeEmbedUrl = (url) => {
   if (!url) return url;
   try {
     let videoId = null;
-
     if (url.includes("youtube.com/embed/")) {
       const match = url.match(/youtube\.com\/embed\/([^/?&]+)/);
       if (match) videoId = match[1];
@@ -50,47 +43,20 @@ const cleanYouTubeEmbedUrl = (url) => {
       const u = new URL(url);
       videoId = u.searchParams.get("v");
     }
-
     if (!videoId) return url;
-
     const params = new URLSearchParams({
-      rel: "0",
-      modestbranding: "1",
-      showinfo: "0",
-      iv_load_policy: "3",
-      cc_load_policy: "0",
-      fs: "1",
-      playsinline: "1",
-      disablekb: "0",
-      color: "white",
-      autoplay: "0",
+      rel: "0", modestbranding: "1", showinfo: "0",
+      iv_load_policy: "3", cc_load_policy: "0", fs: "1",
+      playsinline: "1", disablekb: "0", color: "white", autoplay: "0",
     });
-
     return `https://www.youtube-nocookie.com/embed/${videoId}?${params.toString()}`;
-  } catch {
-    return url;
-  }
+  } catch { return url; }
 };
 
-/**
- * Returns a clean embed URL for a video item.
- * - Bunny Stream URLs are passed through as-is (they already work).
- * - YouTube URLs are sanitized via cleanYouTubeEmbedUrl.
- */
 const getVideoEmbedUrl = (item) => {
   const raw = item.embed_url || null;
-
-  if (!raw) {
-    // No embed_url stored — nothing to show
-    return null;
-  }
-
-  // Bunny Stream embed URL — use directly, no modification needed
-  if (isBunnyEmbed(raw)) {
-    return raw;
-  }
-
-  // YouTube — sanitize
+  if (!raw) return null;
+  if (isBunnyEmbed(raw)) return raw;
   return cleanYouTubeEmbedUrl(raw);
 };
 
@@ -99,54 +65,38 @@ export default function SubjectDetails() {
   const { subjectName } = useParams();
   const [searchParams] = useSearchParams();
 
-  const subject = decodeURIComponent(subjectName || "");
-  const year = searchParams.get("year");
+  const subject  = decodeURIComponent(subjectName || "");
+  const year     = searchParams.get("year");
   const semester = searchParams.get("semester");
 
-  const [faculty, setFaculty] = useState(null);
-  const [unitData, setUnitData] = useState({});
-  const [loading, setLoading] = useState(true);
+  const [faculty,    setFaculty]    = useState(null);
+  const [unitData,   setUnitData]   = useState({});
+  const [loading,    setLoading]    = useState(true);
+  const [openUnit,   setOpenUnit]   = useState(null);
 
-  const [openUnit, setOpenUnit] = useState(null);
-
-  const [selectedPdf, setSelectedPdf] = useState(null);
-  const [selectedVideo, setSelectedVideo] = useState(null);
+  const [selectedPdf,        setSelectedPdf]        = useState(null);
+  const [selectedVideo,      setSelectedVideo]      = useState(null);
   const [selectedAssessment, setSelectedAssessment] = useState(null);
 
   const [assessmentError, setAssessmentError] = useState(false);
-  const [pdfError, setPdfError] = useState(false);
+  const [pdfError,        setPdfError]        = useState(false);
 
-  useEffect(() => {
-    loadSubjectDetails();
-  }, [subject, year, semester]);
-
-  useEffect(() => { setPdfError(false); }, [selectedPdf]);
+  useEffect(() => { loadSubjectDetails(); }, [subject, year, semester]);
+  useEffect(() => { setPdfError(false); },        [selectedPdf]);
   useEffect(() => { setAssessmentError(false); }, [selectedAssessment]);
 
   const getEmbedUrl = (item, type) => {
     if (type === "video") return getVideoEmbedUrl(item);
-
-    if (item.embed_url) return item.embed_url;
-
+    if (item.embed_url)   return item.embed_url;
     if (item.file_id) {
       const base = `https://drive.google.com/file/d/${item.file_id}/preview`;
       return type === "pdf" ? `${base}?embedded=true` : base;
     }
-
     return null;
   };
 
-  const getFileUrl = (item) => {
-    if (item.file_url) return item.file_url;
-    if (item.file_id) return `https://drive.google.com/file/d/${item.file_id}/view`;
-    return null;
-  };
-
-  const getDownloadUrl = (item) => {
-    if (item.file_id) return `https://drive.google.com/uc?export=download&id=${item.file_id}`;
-    if (item.file_url) return item.file_url;
-    return null;
-  };
+  const getFileUrl     = (item) => item.file_url || (item.file_id ? `https://drive.google.com/file/d/${item.file_id}/view` : null);
+  const getDownloadUrl = (item) => item.file_id ? `https://drive.google.com/uc?export=download&id=${item.file_id}` : (item.file_url || null);
 
   const formatUnit = (unit) => {
     if (!unit) return "Unit 1";
@@ -155,33 +105,25 @@ export default function SubjectDetails() {
   };
 
   const normalize = (item, type) => ({
-    ...item,
-    type,
-    embed_url: getEmbedUrl(item, type),
-    file_url: getFileUrl(item),
+    ...item, type,
+    embed_url:    getEmbedUrl(item, type),
+    file_url:     getFileUrl(item),
     download_url: getDownloadUrl(item),
   });
 
   const loadSubjectDetails = async () => {
     try {
       setLoading(true);
-
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) { setLoading(false); return; }
 
       const { data: facultyData, error: fErr } = await supabase
-        .from("faculty")
-        .select("*")
-        .eq("id", user.id)
-        .single();
-
+        .from("faculty").select("*").eq("id", user.id).single();
       if (fErr) throw fErr;
       setFaculty(facultyData);
 
       const base = (table) =>
-        supabase
-          .from(table)
-          .select("*")
+        supabase.from(table).select("*")
           .eq("faculty_id", facultyData.id)
           .eq("subject", subject)
           .eq("year", year);
@@ -202,7 +144,7 @@ export default function SubjectDetails() {
 
       const allContent = [
         ...videos.map((i) => normalize(i, "video")),
-        ...pdfs.map((i) => normalize(i, "pdf")),
+        ...pdfs.map((i)   => normalize(i, "pdf")),
         ...assessments.map((i) => normalize(i, "assessment")),
       ];
 
@@ -210,17 +152,14 @@ export default function SubjectDetails() {
       allContent.forEach((item) => {
         const unit  = formatUnit(item.unit);
         const title = item.title || "Untitled";
-
-        if (!grouped[unit]) grouped[unit] = {};
-        if (!grouped[unit][title]) grouped[unit][title] = { video: null, pdf: null, assessment: null };
-
+        if (!grouped[unit])        grouped[unit] = {};
+        if (!grouped[unit][title]) grouped[unit][title] = { video: null, pdf: null, assessment: null, unit, title };
         if (item.type === "video")      grouped[unit][title].video      = item;
         if (item.type === "pdf")        grouped[unit][title].pdf        = item;
         if (item.type === "assessment") grouped[unit][title].assessment = item;
       });
 
       setUnitData(grouped);
-
       const sorted = Object.keys(grouped).sort((a, b) => {
         const n = (s) => parseInt(s.replace(/\D/g, "")) || 0;
         return n(a) - n(b);
@@ -237,14 +176,11 @@ export default function SubjectDetails() {
 
   const handleDelete = async (item) => {
     if (!window.confirm(`Delete "${item.title}"?`)) return;
-
     const table =
-      item.type === "video" ? "videos" :
-      item.type === "pdf"   ? "pdfs"   : "assessments";
-
+      item.type === "video"      ? "videos" :
+      item.type === "pdf"        ? "pdfs"   : "assessments";
     const { error } = await supabase.from(table).delete().eq("id", item.id);
     if (error) { alert("Delete failed. Please try again."); return; }
-
     setUnitData((prev) => {
       const next = JSON.parse(JSON.stringify(prev));
       Object.keys(next).forEach((unit) => {
@@ -253,11 +189,25 @@ export default function SubjectDetails() {
           if (item.type === "video"      && topic.video?.id      === item.id) topic.video      = null;
           if (item.type === "pdf"        && topic.pdf?.id        === item.id) topic.pdf        = null;
           if (item.type === "assessment" && topic.assessment?.id === item.id) topic.assessment = null;
-          if (!topic.video && !topic.pdf && !topic.assessment) delete next[unit][title];
         });
-        if (Object.keys(next[unit]).length === 0) delete next[unit];
       });
       return next;
+    });
+  };
+
+  // Navigate to upload page with context pre-filled via state
+  const handleUploadMissing = (topicMeta, uploadType) => {
+    navigate("/faculty/upload", {
+      state: {
+        prefill: {
+          subject,
+          title:    topicMeta.title,
+          unit:     topicMeta.unit,
+          year,
+          semester: semester || "",
+          focusTab: uploadType, // "pdf" | "assessment"
+        },
+      },
     });
   };
 
@@ -298,7 +248,7 @@ export default function SubjectDetails() {
             <div className="flex items-start justify-between gap-4 flex-wrap">
               <div>
                 <h1 className="text-2xl md:text-3xl font-extrabold text-[#101828] capitalize tracking-tight">
-                  Module curriculum
+                  Module Curriculum
                 </h1>
                 <p className="mt-1 text-sm text-[#5F5548] font-medium">
                   {sortedUnits.length} units · {totalResources} resources
@@ -386,6 +336,7 @@ export default function SubjectDetails() {
                                 onViewPdf={() => setSelectedPdf(row.pdf)}
                                 onViewAssess={() => setSelectedAssessment(row.assessment)}
                                 onDelete={handleDelete}
+                                onUploadMissing={handleUploadMissing}
                               />
                             );
                           })}
@@ -411,21 +362,10 @@ export default function SubjectDetails() {
           downloadLabel="Download PDF"
         >
           {pdfError ? (
-            <PreviewError
-              fileUrl={selectedPdf.file_url}
-              downloadUrl={selectedPdf.download_url}
-              downloadLabel="Download PDF"
-            />
+            <PreviewError fileUrl={selectedPdf.file_url} downloadUrl={selectedPdf.download_url} downloadLabel="Download PDF" />
           ) : selectedPdf.embed_url ? (
-            <iframe
-              key={selectedPdf.id}
-              src={selectedPdf.embed_url}
-              title={selectedPdf.title}
-              className="w-full h-full"
-              allow="autoplay"
-              onError={() => setPdfError(true)}
-              style={{ border: "none" }}
-            />
+            <iframe key={selectedPdf.id} src={selectedPdf.embed_url} title={selectedPdf.title}
+              className="w-full h-full" allow="autoplay" onError={() => setPdfError(true)} style={{ border: "none" }} />
           ) : (
             <NoPreview fileUrl={selectedPdf.file_url} />
           )}
@@ -459,21 +399,10 @@ export default function SubjectDetails() {
           downloadLabel="Download File"
         >
           {assessmentError ? (
-            <PreviewError
-              fileUrl={selectedAssessment.file_url}
-              downloadUrl={selectedAssessment.download_url}
-              downloadLabel="Download File"
-            />
+            <PreviewError fileUrl={selectedAssessment.file_url} downloadUrl={selectedAssessment.download_url} downloadLabel="Download File" />
           ) : selectedAssessment.embed_url ? (
-            <iframe
-              key={selectedAssessment.id}
-              src={selectedAssessment.embed_url}
-              title={selectedAssessment.title}
-              className="w-full h-full bg-white"
-              allow="autoplay"
-              onError={() => setAssessmentError(true)}
-              style={{ border: "none" }}
-            />
+            <iframe key={selectedAssessment.id} src={selectedAssessment.embed_url} title={selectedAssessment.title}
+              className="w-full h-full bg-white" allow="autoplay" onError={() => setAssessmentError(true)} style={{ border: "none" }} />
           ) : (
             <NoPreview fileUrl={selectedAssessment.file_url} />
           )}
@@ -484,7 +413,7 @@ export default function SubjectDetails() {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// VideoPlayer — handles both Bunny Stream and YouTube embeds
+// VideoPlayer
 // ─────────────────────────────────────────────────────────────────────────────
 function VideoPlayer({ embedUrl, title, videoId, isBunny }) {
   if (!embedUrl) {
@@ -494,111 +423,131 @@ function VideoPlayer({ embedUrl, title, videoId, isBunny }) {
       </div>
     );
   }
-
-  // ── Bunny Stream player ──
-  // Bunny iframes need allow="autoplay" for controls to work correctly.
-  // No sandbox restriction — Bunny's CDN domain is trusted and sandboxing
-  // breaks their player's internal JS.
   if (isBunny) {
     return (
       <div className="w-full h-full bg-black flex items-center justify-center">
-        <iframe
-          key={videoId}
-          src={embedUrl}
-          title={title}
-          className="w-full h-full"
+        <iframe key={videoId} src={embedUrl} title={title} className="w-full h-full"
           allow="autoplay; fullscreen; encrypted-media; picture-in-picture"
-          allowFullScreen
-          style={{ border: "none", display: "block" }}
-        />
+          allowFullScreen style={{ border: "none", display: "block" }} />
       </div>
     );
   }
-
-  // ── YouTube player ──
-  // Uses youtube-nocookie.com (set by cleanYouTubeEmbedUrl).
-  // Sandbox is intentionally tight — blocks navigation away from the embed.
   return (
     <div className="w-full h-full bg-black flex items-center justify-center">
-      <iframe
-        key={videoId}
-        src={embedUrl}
-        title={title}
-        className="w-full h-full"
-        allow="fullscreen; encrypted-media"
-        allowFullScreen
+      <iframe key={videoId} src={embedUrl} title={title} className="w-full h-full"
+        allow="fullscreen; encrypted-media" allowFullScreen
         sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-presentation"
-        referrerPolicy="strict-origin"
-        style={{ border: "none", display: "block" }}
-      />
+        referrerPolicy="strict-origin" style={{ border: "none", display: "block" }} />
     </div>
   );
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// TopicBlock
+// TopicBlock — always shows all 3 slots; missing ones get an upload shortcut
 // ─────────────────────────────────────────────────────────────────────────────
-function TopicBlock({ title, topicNumber, row, pal, onViewVideo, onViewPdf, onViewAssess, onDelete }) {
-  const actions = [
-    row.video && {
-      type: "video",
-      item: row.video,
-      label: "Video",
-      icon: <PlayCircle size={14} />,
-      onView: onViewVideo,
-      btnClass: "bg-[#EAF1FB] text-[#12376B] hover:bg-[#DCE8F8] border-[#D6E2F2]",
+function TopicBlock({ title, topicNumber, row, pal, onViewVideo, onViewPdf, onViewAssess, onDelete, onUploadMissing }) {
+  // Slot definitions — always rendered regardless of whether content exists
+  const slots = [
+    {
+      type:      "video",
+      item:      row.video,
+      label:     "Video",
+      icon:      <PlayCircle size={13} />,
+      onView:    onViewVideo,
+      // Videos can't be added from here (they need a file), so no upload shortcut
+      canUpload: false,
+      uploadTab: null,
+      presentClass: "bg-[#EAF1FB] text-[#12376B] hover:bg-[#DCE8F8] border-[#D6E2F2]",
+      missingClass: "bg-[#F5F8FF] text-[#94A3B8] border-[#CBD5E1] border-dashed cursor-default",
+      dividerColor: "bg-[#B8D5E8]",
     },
-    row.pdf && {
-      type: "pdf",
-      item: row.pdf,
-      label: "Lecture PDF",
-      icon: <FileText size={14} />,
-      onView: onViewPdf,
-      btnClass: "bg-[#FFF4DF] text-[#9A5B00] hover:bg-[#FFE8BD] border-[#F3D8A7]",
+    {
+      type:      "pdf",
+      item:      row.pdf,
+      label:     "Lectures",
+      icon:      <FileText size={13} />,
+      onView:    onViewPdf,
+      canUpload: true,
+      uploadTab: "pdf",
+      presentClass: "bg-[#FFF4DF] text-[#9A5B00] hover:bg-[#FFE8BD] border-[#F3D8A7]",
+      missingClass: "bg-[#FFFBF0] text-[#B45309] border-[#FCD34D] border-dashed",
+      dividerColor: "bg-[#E8CCA7]",
     },
-    row.assessment && {
-      type: "assessment",
-      item: row.assessment,
-      label: "Assessment",
-      icon: <ClipboardList size={14} />,
-      onView: onViewAssess,
-      btnClass: "bg-[#EAF7F0] text-[#166534] hover:bg-[#DDF0E5] border-[#CFE8D8]",
+    {
+      type:      "assessment",
+      item:      row.assessment,
+      label:     "Assessment",
+      icon:      <ClipboardList size={13} />,
+      onView:    onViewAssess,
+      canUpload: true,
+      uploadTab: "assessment",
+      presentClass: "bg-[#EAF7F0] text-[#166534] hover:bg-[#DDF0E5] border-[#CFE8D8]",
+      missingClass: "bg-[#F0FDF4] text-[#16A34A] border-[#86EFAC] border-dashed",
+      dividerColor: "bg-[#BFE8D7]",
     },
-  ].filter(Boolean);
+  ];
 
   return (
     <div className="px-5 py-2.5 border-b border-[#EEE5D8] last:border-b-0 hover:bg-[#FBF8F3] transition-colors">
-      <div className="flex items-center justify-between gap-4">
-        <div className="flex items-center gap-3 min-w-0 flex-1">
-          <span className={`w-7 h-7 rounded-md ${pal.badgeBg} ${pal.badgeText} flex items-center justify-center text-[11px] font-extrabold flex-shrink-0`}>
-            {String(topicNumber).padStart(2, "0")}
-          </span>
-          <div className="min-w-0 flex-1">
-            <h3 className="text-sm md:text-[15px] font-black text-[#0F172A] uppercase tracking-wide truncate">
-              {title}
-            </h3>
-          </div>
-        </div>
+      {/* Single row: number + title on left, all action slots pinned to right */}
+      <div className="flex items-center gap-3 min-w-0">
+        {/* Topic number badge */}
+        <span className={`w-7 h-7 rounded-md ${pal.badgeBg} ${pal.badgeText} flex items-center justify-center text-[11px] font-extrabold flex-shrink-0`}>
+          {String(topicNumber).padStart(2, "0")}
+        </span>
 
-        <div className="flex items-center gap-2 flex-shrink-0">
-          {actions.map(({ type, item, label, icon, onView, btnClass }) => (
-            <div key={type} className="flex items-center gap-1">
-              <button
-                onClick={onView}
-                className={`inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-md text-[11px] font-bold border transition-colors ${btnClass}`}
-              >
-                {icon}
-                {label}
-              </button>
-              <button
-                onClick={() => onDelete(item)}
-                className="w-7 h-7 rounded-md flex items-center justify-center text-[#B42318] hover:bg-[#FEE4E2] transition-colors"
-                title={`Delete ${label}`}
-              >
-                <Trash2 size={13} />
-              </button>
-            </div>
-          ))}
+        {/* Topic title — grows to fill space, truncates if too long */}
+        <h3 className="text-sm md:text-[14px] font-black text-[#0F172A] uppercase tracking-wide truncate flex-1 min-w-0">
+          {title}
+        </h3>
+
+        {/* Slots — always 3, pinned to right, each with equal width */}
+        <div className="flex items-center gap-1.5 flex-shrink-0">
+          {slots.map(({ type, item, label, icon, onView, canUpload, uploadTab, presentClass, missingClass, dividerColor }) => {
+            if (item) {
+              // ── Uploaded — single pill: [icon + label | trash] ──
+              return (
+                <div key={type} className={`flex items-center rounded-md border text-[11px] font-bold overflow-hidden w-[120px] ${presentClass}`}>
+                  <button
+                    onClick={onView}
+                    className="flex-1 min-w-0 flex items-center justify-center gap-1 px-2 py-1.5 transition-colors hover:brightness-95"
+                  >
+                    <span className="flex-shrink-0">{icon}</span>
+                    <span className="truncate">{label}</span>
+                  </button>
+                  <span className={`w-px self-stretch ${dividerColor}`} />
+                  <button
+                    onClick={(e) => { e.stopPropagation(); onDelete(item); }}
+                    className="px-1.5 py-1.5 text-[#B42318] hover:bg-[#FEE4E2] transition-colors flex items-center flex-shrink-0"
+                    title={`Delete ${label}`}
+                  >
+                    <Trash2 size={11} />
+                  </button>
+                </div>
+              );
+            }
+
+            // ── Missing ──
+            return (
+              <div key={type} className="w-[120px]">
+                {canUpload ? (
+                  <button
+                    onClick={() => onUploadMissing({ unit: row.unit, title: row.title }, uploadTab)}
+                    className={`w-full flex items-center justify-center gap-1 px-2 py-1.5 rounded-md text-[11px] font-semibold border transition-colors hover:opacity-80 ${missingClass}`}
+                    title={`Upload ${label} for this topic`}
+                  >
+                    <Plus size={11} strokeWidth={2.5} />
+                    <span className="truncate">{label}</span>
+                  </button>
+                ) : (
+                  <span className={`w-full flex items-center justify-center gap-1 px-2 py-1.5 rounded-md text-[11px] font-semibold border select-none ${missingClass}`}>
+                    <span className="flex-shrink-0">{icon}</span>
+                    <span className="opacity-50 truncate">No {label}</span>
+                  </span>
+                )}
+              </div>
+            );
+          })}
         </div>
       </div>
     </div>
@@ -617,39 +566,25 @@ function ViewerModal({ title, subtitle, onClose, fileUrl, downloadUrl, downloadL
             <h2 className="text-white text-lg font-bold truncate">{title}</h2>
             {subtitle && <p className="text-blue-200 text-xs mt-0.5 font-medium">{subtitle}</p>}
           </div>
-
           <div className="flex items-center gap-2 flex-shrink-0">
             {fileUrl && (
-              <a
-                href={fileUrl}
-                target="_blank"
-                rel="noreferrer"
-                className="hidden sm:flex items-center gap-1.5 bg-white/10 hover:bg-white/20 text-white px-3 py-2 rounded-lg text-xs font-semibold transition-colors"
-              >
-                <ExternalLink size={13} />
-                Open
+              <a href={fileUrl} target="_blank" rel="noreferrer"
+                className="hidden sm:flex items-center gap-1.5 bg-white/10 hover:bg-white/20 text-white px-3 py-2 rounded-lg text-xs font-semibold transition-colors">
+                <ExternalLink size={13} /> Open
               </a>
             )}
             {downloadUrl && (
-              <a
-                href={downloadUrl}
-                target="_blank"
-                rel="noreferrer"
-                className="hidden sm:flex items-center gap-1.5 bg-[#F4C542] hover:bg-[#E8B923] text-black px-3 py-2 rounded-lg text-xs font-bold transition-colors"
-              >
-                <Download size={13} />
-                {downloadLabel || "Download"}
+              <a href={downloadUrl} target="_blank" rel="noreferrer"
+                className="hidden sm:flex items-center gap-1.5 bg-[#F4C542] hover:bg-[#E8B923] text-black px-3 py-2 rounded-lg text-xs font-bold transition-colors">
+                <Download size={13} /> {downloadLabel || "Download"}
               </a>
             )}
-            <button
-              onClick={onClose}
-              className="w-9 h-9 rounded-lg bg-white/10 hover:bg-white/20 flex items-center justify-center text-white transition-colors"
-            >
+            <button onClick={onClose}
+              className="w-9 h-9 rounded-lg bg-white/10 hover:bg-white/20 flex items-center justify-center text-white transition-colors">
               <X size={18} />
             </button>
           </div>
         </div>
-
         <div className="flex-1 overflow-hidden bg-black">{children}</div>
       </div>
     </div>
@@ -669,25 +604,15 @@ function PreviewError({ fileUrl, downloadUrl, downloadLabel }) {
       </p>
       <div className="flex gap-3 flex-wrap justify-center">
         {fileUrl && (
-          <a
-            href={fileUrl}
-            target="_blank"
-            rel="noreferrer"
-            className="flex items-center gap-2 bg-blue-600 hover:bg-blue-700 text-white px-5 py-2.5 rounded-xl font-semibold text-sm transition-colors"
-          >
-            <ExternalLink size={15} />
-            Open in Drive
+          <a href={fileUrl} target="_blank" rel="noreferrer"
+            className="flex items-center gap-2 bg-blue-600 hover:bg-blue-700 text-white px-5 py-2.5 rounded-xl font-semibold text-sm transition-colors">
+            <ExternalLink size={15} /> Open in Drive
           </a>
         )}
         {downloadUrl && (
-          <a
-            href={downloadUrl}
-            target="_blank"
-            rel="noreferrer"
-            className="flex items-center gap-2 bg-yellow-400 hover:bg-yellow-300 text-black px-5 py-2.5 rounded-xl font-black text-sm transition-colors"
-          >
-            <Download size={15} />
-            {downloadLabel || "Download"}
+          <a href={downloadUrl} target="_blank" rel="noreferrer"
+            className="flex items-center gap-2 bg-yellow-400 hover:bg-yellow-300 text-black px-5 py-2.5 rounded-xl font-black text-sm transition-colors">
+            <Download size={15} /> {downloadLabel || "Download"}
           </a>
         )}
       </div>
@@ -700,12 +625,8 @@ function NoPreview({ fileUrl }) {
     <div className="w-full h-full flex flex-col items-center justify-center gap-4 text-white bg-[#202020]">
       <p className="text-gray-400 text-sm">No preview URL available.</p>
       {fileUrl && (
-        <a
-          href={fileUrl}
-          target="_blank"
-          rel="noreferrer"
-          className="bg-blue-600 hover:bg-blue-700 text-white px-5 py-2.5 rounded-xl font-semibold text-sm transition-colors"
-        >
+        <a href={fileUrl} target="_blank" rel="noreferrer"
+          className="bg-blue-600 hover:bg-blue-700 text-white px-5 py-2.5 rounded-xl font-semibold text-sm transition-colors">
           Open in Drive
         </a>
       )}
