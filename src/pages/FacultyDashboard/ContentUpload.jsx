@@ -488,62 +488,99 @@ function UnifiedUploadForm({ faculty, prefill }) {
   // ═══════════════════════════════════════════════════════════════
   // PDF UPLOAD
   // ═══════════════════════════════════════════════════════════════
-  async function handlePdfUpload() {
-    setError("");
-    setPdfSuccess(false);
+ async function handlePdfUpload() {
+  setError("");
+  setPdfSuccess(false);
 
-    const currentFaculty = faculty || JSON.parse(localStorage.getItem("faculty") || "null");
-    if (!currentFaculty?.id) { setError("Please login again"); return; }
+  const currentFaculty =
+    faculty || JSON.parse(localStorage.getItem("faculty") || "null");
 
-    const validationError = validateCommonFields();
-    if (validationError) { setError(validationError); return; }
-
-    if (!pdfFile) { setError("Please select a PDF file"); return; }
-
-    const existing = await checkForDuplicate(
-      "content", currentFaculty.id, form.subject, form.title, form.year, form.semester
-    );
-    if (existing.length > 0) {
-      const proceed = await askUserAboutDuplicate(existing, "PDF");
-      if (!proceed) return;
-    }
-
-    try {
-      setPdfLoading(true);
-      const formData = new FormData();
-      formData.append("file", pdfFile);
-      formData.append("type", "pdf");
-      formData.append("faculty_id", currentFaculty.id);
-      formData.append("faculty_name", currentFaculty.name || "");
-      formData.append("department", currentFaculty.department);
-      formData.append("subject", form.subject);
-      formData.append("unit", form.unit);
-      formData.append("title", form.title);
-      formData.append("year", form.year);
-      formData.append("semester", form.year === "1" ? "" : form.semester);
-
-      const res = await fetch(`${BASE_URL()}/upload-content`, { method: "POST", body: formData });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || "Upload failed");
-
-      setPdfSuccess(true);
-      // Clear file + input after success
-      setPdfFile(null);
-      const fi = document.getElementById("pdf-file-input");
-      if (fi) fi.value = "";
-
-      // Auto-collapse after 2.5s
-      setTimeout(() => {
-        setShowPdfUpload(false);
-        setPdfSuccess(false);
-      }, 2500);
-
-    } catch (err) {
-      setError(err.message || "PDF upload failed");
-    } finally {
-      setPdfLoading(false);
-    }
+  if (!currentFaculty?.id) {
+    setError("Please login again");
+    return;
   }
+
+  const validationError = validateCommonFields();
+  if (validationError) {
+    setError(validationError);
+    return;
+  }
+
+  if (!pdfFile) {
+    setError("Please select a PDF file");
+    return;
+  }
+
+  // duplicate check against correct table
+  const existing = await checkForDuplicate(
+    "pdfs",
+    currentFaculty.id,
+    form.subject,
+    form.title,
+    form.year,
+    form.semester
+  );
+
+  if (existing.length > 0) {
+    const proceed = await askUserAboutDuplicate(existing, "PDF");
+    if (!proceed) return;
+  }
+
+  try {
+    setPdfLoading(true);
+
+    const formData = new FormData();
+    formData.append("file", pdfFile);
+    formData.append("type", "pdf");
+    formData.append("faculty_id", currentFaculty.id);
+    formData.append("faculty_name", currentFaculty.name || "");
+    formData.append("department", currentFaculty.department || "");
+    formData.append("subject", form.subject);
+    formData.append("unit", form.unit);
+    formData.append("title", form.title);
+    formData.append("year", form.year);
+    formData.append("semester", form.year === "1" ? "" : form.semester);
+
+    const res = await fetch(`${BASE_URL()}/upload-content`, {
+      method: "POST",
+      body: formData,
+    });
+
+    const contentType = res.headers.get("content-type") || "";
+
+    let data = {};
+
+    if (contentType.includes("application/json")) {
+      data = await res.json();
+    } else {
+      const text = await res.text();
+      throw new Error(
+        `Backend route not found or invalid response (${res.status}). Check backend server on ${BASE_URL()}`
+      );
+    }
+
+    if (!res.ok) {
+      throw new Error(data.error || "Upload failed");
+    }
+
+    setPdfSuccess(true);
+    setPdfFile(null);
+
+    const fi = document.getElementById("pdf-file-input");
+    if (fi) fi.value = "";
+
+    setTimeout(() => {
+      setShowPdfUpload(false);
+      setPdfSuccess(false);
+    }, 2500);
+
+  } catch (err) {
+    console.error("PDF upload error:", err);
+    setError(err.message || "PDF upload failed");
+  } finally {
+    setPdfLoading(false);
+  }
+}
 
   // ═══════════════════════════════════════════════════════════════
   // ASSESSMENT UPLOAD
