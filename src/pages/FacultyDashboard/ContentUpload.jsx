@@ -241,7 +241,6 @@ function UnifiedUploadForm({ faculty, prefill }) {
   const [pdfFile, setPdfFile] = useState(null);
   const [assessmentFile, setAssessmentFile] = useState(null);
 
-  // Auto-expand the right section when arriving from SubjectDetails shortcut
   const [showPdfUpload,        setShowPdfUpload]        = useState(prefill?.focusTab === "pdf");
   const [showAssessmentUpload, setShowAssessmentUpload] = useState(prefill?.focusTab === "assessment");
 
@@ -250,7 +249,6 @@ function UnifiedUploadForm({ faculty, prefill }) {
   const [assessmentLoading, setAssessmentLoading] = useState(false);
 
   const [error, setError] = useState("");
-  // Inline success states — shown inside their respective section
   const [videoSuccess, setVideoSuccess] = useState(false);
   const [pdfSuccess, setPdfSuccess] = useState(false);
   const [assessmentSuccess, setAssessmentSuccess] = useState(false);
@@ -269,14 +267,12 @@ function UnifiedUploadForm({ faculty, prefill }) {
   const [etaSeconds, setEtaSeconds] = useState(null);
 
   const abortCtrlRef = useRef(null);
-  const sseRef = useRef(null);
   const startTimeRef = useRef(null);
   const lastLoadedRef = useRef(0);
   const speedTimerRef = useRef(null);
 
   useEffect(() => {
     return () => {
-      sseRef.current?.close();
       abortCtrlRef.current?.abort();
       clearInterval(speedTimerRef.current);
     };
@@ -331,7 +327,6 @@ function UnifiedUploadForm({ faculty, prefill }) {
 
   function handleVideoCancel() {
     abortCtrlRef.current?.abort();
-    sseRef.current?.close();
     clearInterval(speedTimerRef.current);
     setVideoLoading(false);
     setUploadPhase("");
@@ -361,13 +356,12 @@ function UnifiedUploadForm({ faculty, prefill }) {
       setDuplicateTitles(existingRows.map((r) => r.title));
       setDuplicateType(type);
       setShowDuplicateModal(true);
-      // Always resolves false — duplicate uploads are never allowed
       duplicateResolveRef.current = () => resolve(false);
     });
   }
 
   // ═══════════════════════════════════════════════════════════════
-  // VIDEO UPLOAD
+  // VIDEO UPLOAD — NEW DIRECT BUNNY ARCHITECTURE
   // ═══════════════════════════════════════════════════════════════
   async function handleVideoUpload() {
     setError("");
@@ -396,85 +390,126 @@ function UnifiedUploadForm({ faculty, prefill }) {
       setLoadedBytes(0);
       setSpeedMBs("0.0");
       setEtaSeconds(null);
-      setUploadPhase("sending");
 
-      const formData = new FormData();
-      formData.append("file", videoFile);
-      formData.append("faculty_id", currentFaculty.id);
-      formData.append("faculty_name", currentFaculty.name || "");
-      formData.append("department", currentFaculty.department || "");
-      formData.append("year", form.year);
-      formData.append("semester", form.year === "1" ? "" : form.semester);
-      formData.append("subject", form.subject);
-      formData.append("unit", form.unit);
-      formData.append("title", form.title);
+      // ─────────────────────────────────────────────────────────────
+      // STEP 1: Get upload configuration from backend
+      // ─────────────────────────────────────────────────────────────
+      setUploadPhase("preparing");
 
-      abortCtrlRef.current = new AbortController();
-
-      const uploadRes = await fetch(`${BASE_URL()}/upload-video`, {
+      const configRes = await fetch(`${BASE_URL()}/create-video-upload`, {
         method: "POST",
-        body: formData,
-        signal: abortCtrlRef.current.signal,
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          fileName: videoFile.name,
+          fileSize: videoFile.size,
+        }),
       });
 
-      if (!uploadRes.ok) {
-        const errData = await uploadRes.json().catch(() => ({}));
-        throw new Error(errData.error || `Server error ${uploadRes.status}`);
+      if (!configRes.ok) {
+        const errData = await configRes.json().catch(() => ({}));
+        throw new Error(errData.error || `Config request failed: ${configRes.status}`);
       }
 
-      const { uploadId, cdnUrl: videoCdnUrl } = await uploadRes.json();
+      const { uploadUrl, accessKey, cdnUrl: videoCdnUrl, filePath } = await configRes.json();
 
+      console.log("[VideoUpload] Upload config received:", { uploadUrl, cdnUrl: videoCdnUrl, filePath });
+
+      // ─────────────────────────────────────────────────────────────
+      // STEP 2: Upload directly to Bunny Storage
+      // ─────────────────────────────────────────────────────────────
       setUploadPhase("uploading");
       startSpeedTracker(() => videoFile.size);
 
-      await new Promise((resolve, reject) => {
-        const sse = new EventSource(`${BASE_URL()}/upload-video-progress/${uploadId}`);
-        sseRef.current = sse;
+      abortCtrlRef.current = new AbortController();
 
-        sse.onmessage = (ev) => {
-          let data;
-          try { data = JSON.parse(ev.data); } catch { return; }
+      const xhr = new XMLHttpRequest();
 
-          if (data.status === "uploading") {
-            setLoadedBytes(data.loaded || 0);
-            lastLoadedRef.current = data.loaded || 0;
-          }
-          if (data.status === "done") {
-            setLoadedBytes(videoFile.size);
-            lastLoadedRef.current = videoFile.size;
-            sse.close();
-            sseRef.current = null;
-            resolve();
-          }
-          if (data.status === "error") {
-            sse.close();
-            sseRef.current = null;
-            reject(new Error(data.error || "Upload failed on server."));
-          }
-        };
-
-        sse.onerror = () => {
-          if (sseRef.current) {
-            sse.close();
-            sseRef.current = null;
-            reject(new Error("Lost connection to progress stream. Check server logs."));
-          }
-        };
+      // Track upload progress
+      xhr.upload.addEventListener("progress", (e) => {
+        if (e.lengthComputable) {
+          setLoadedBytes(e.loaded);
+          lastLoadedRef.current = e.loaded;
+        }
       });
 
+      // Handle completion
+      const uploadPromise = new Promise((resolve, reject) => {
+        xhr.addEventListener("load", () => {
+          if (xhr.status === 200 || xhr.status === 201) {
+            console.log("[VideoUpload] ✅ Direct upload to Bunny complete");
+            resolve();
+          } else {
+            reject(new Error(`Bunny upload failed: HTTP ${xhr.status}`));
+          }
+        });
+
+        xhr.addEventListener("error", () => {
+          reject(new Error("Network error during Bunny upload"));
+        });
+
+        xhr.addEventListener("abort", () => {
+          reject(new Error("Upload cancelled"));
+        });
+      });
+
+      // Connect abort controller
+      abortCtrlRef.current.signal.addEventListener("abort", () => {
+        xhr.abort();
+      });
+
+      // Send PUT request to Bunny
+      xhr.open("PUT", uploadUrl);
+      xhr.setRequestHeader("AccessKey", accessKey);
+      xhr.setRequestHeader("Content-Type", "video/mp4");
+      xhr.send(videoFile);
+
+      await uploadPromise;
+
       clearInterval(speedTimerRef.current);
+
+      // ─────────────────────────────────────────────────────────────
+      // STEP 3: Save metadata to Supabase
+      // ─────────────────────────────────────────────────────────────
+      setUploadPhase("saving");
+
+      const metadataRes = await fetch(`${BASE_URL()}/save-video-metadata`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          filePath,
+          cdnUrl: videoCdnUrl,
+          faculty_id: currentFaculty.id,
+          faculty_name: currentFaculty.name || "",
+          department: currentFaculty.department || "",
+          year: form.year,
+          semester: form.year === "1" ? "" : form.semester,
+          subject: form.subject,
+          unit: form.unit,
+          title: form.title,
+        }),
+      });
+
+      if (!metadataRes.ok) {
+        const errData = await metadataRes.json().catch(() => ({}));
+        throw new Error(errData.error || "Metadata save failed");
+      }
+
+      console.log("[VideoUpload] ✅ Metadata saved to Supabase");
+
       setUploadPhase("done");
       setCdnUrl(videoCdnUrl);
       setVideoSuccess(true);
-      // Clear file input after success
       setVideoFile(null);
       const fi = document.getElementById("video-file-input");
       if (fi) fi.value = "";
 
     } catch (err) {
-      if (err.name === "AbortError") return;
-      console.error("[VideoUpload] error:", err);
-      setError(err.message || "Video upload failed. Please try again.");
+      if (err.message === "Upload cancelled") {
+        setError("Video upload cancelled.");
+      } else {
+        console.error("[VideoUpload] error:", err);
+        setError(err.message || "Video upload failed. Please try again.");
+      }
     } finally {
       clearInterval(speedTimerRef.current);
       setVideoLoading(false);
@@ -486,104 +521,102 @@ function UnifiedUploadForm({ faculty, prefill }) {
   }
 
   // ═══════════════════════════════════════════════════════════════
-  // PDF UPLOAD
+  // PDF UPLOAD (UNCHANGED)
   // ═══════════════════════════════════════════════════════════════
- async function handlePdfUpload() {
-  setError("");
-  setPdfSuccess(false);
+  async function handlePdfUpload() {
+    setError("");
+    setPdfSuccess(false);
 
-  const currentFaculty =
-    faculty || JSON.parse(localStorage.getItem("faculty") || "null");
+    const currentFaculty =
+      faculty || JSON.parse(localStorage.getItem("faculty") || "null");
 
-  if (!currentFaculty?.id) {
-    setError("Please login again");
-    return;
-  }
-
-  const validationError = validateCommonFields();
-  if (validationError) {
-    setError(validationError);
-    return;
-  }
-
-  if (!pdfFile) {
-    setError("Please select a PDF file");
-    return;
-  }
-
-  // duplicate check against correct table
-  const existing = await checkForDuplicate(
-    "pdfs",
-    currentFaculty.id,
-    form.subject,
-    form.title,
-    form.year,
-    form.semester
-  );
-
-  if (existing.length > 0) {
-    const proceed = await askUserAboutDuplicate(existing, "PDF");
-    if (!proceed) return;
-  }
-
-  try {
-    setPdfLoading(true);
-
-    const formData = new FormData();
-    formData.append("file", pdfFile);
-    formData.append("type", "pdf");
-    formData.append("faculty_id", currentFaculty.id);
-    formData.append("faculty_name", currentFaculty.name || "");
-    formData.append("department", currentFaculty.department || "");
-    formData.append("subject", form.subject);
-    formData.append("unit", form.unit);
-    formData.append("title", form.title);
-    formData.append("year", form.year);
-    formData.append("semester", form.year === "1" ? "" : form.semester);
-
-    const res = await fetch(`${BASE_URL()}/upload-content`, {
-      method: "POST",
-      body: formData,
-    });
-
-    const contentType = res.headers.get("content-type") || "";
-
-    let data = {};
-
-    if (contentType.includes("application/json")) {
-      data = await res.json();
-    } else {
-      const text = await res.text();
-      throw new Error(
-        `Backend route not found or invalid response (${res.status}). Check backend server on ${BASE_URL()}`
-      );
+    if (!currentFaculty?.id) {
+      setError("Please login again");
+      return;
     }
 
-    if (!res.ok) {
-      throw new Error(data.error || "Upload failed");
+    const validationError = validateCommonFields();
+    if (validationError) {
+      setError(validationError);
+      return;
     }
 
-    setPdfSuccess(true);
-    setPdfFile(null);
+    if (!pdfFile) {
+      setError("Please select a PDF file");
+      return;
+    }
 
-    const fi = document.getElementById("pdf-file-input");
-    if (fi) fi.value = "";
+    const existing = await checkForDuplicate(
+      "pdfs",
+      currentFaculty.id,
+      form.subject,
+      form.title,
+      form.year,
+      form.semester
+    );
 
-    setTimeout(() => {
-      setShowPdfUpload(false);
-      setPdfSuccess(false);
-    }, 2500);
+    if (existing.length > 0) {
+      const proceed = await askUserAboutDuplicate(existing, "PDF");
+      if (!proceed) return;
+    }
 
-  } catch (err) {
-    console.error("PDF upload error:", err);
-    setError(err.message || "PDF upload failed");
-  } finally {
-    setPdfLoading(false);
+    try {
+      setPdfLoading(true);
+
+      const formData = new FormData();
+      formData.append("file", pdfFile);
+      formData.append("type", "pdf");
+      formData.append("faculty_id", currentFaculty.id);
+      formData.append("faculty_name", currentFaculty.name || "");
+      formData.append("department", currentFaculty.department || "");
+      formData.append("subject", form.subject);
+      formData.append("unit", form.unit);
+      formData.append("title", form.title);
+      formData.append("year", form.year);
+      formData.append("semester", form.year === "1" ? "" : form.semester);
+
+      const res = await fetch(`${BASE_URL()}/upload-content`, {
+        method: "POST",
+        body: formData,
+      });
+
+      const contentType = res.headers.get("content-type") || "";
+
+      let data = {};
+
+      if (contentType.includes("application/json")) {
+        data = await res.json();
+      } else {
+        throw new Error(
+          `Backend route not found or invalid response (${res.status}). Check backend server on ${BASE_URL()}`
+        );
+      }
+
+      if (!res.ok) {
+        throw new Error(data.error || "Upload failed");
+      }
+
+      setPdfSuccess(true);
+      setPdfFile(null);
+
+      const fi = document.getElementById("pdf-file-input");
+      if (fi) fi.value = "";
+
+      setTimeout(() => {
+        setShowPdfUpload(false);
+        setPdfSuccess(false);
+      }, 2500);
+
+    } catch (err) {
+      console.error("PDF upload error:", err);
+      setError(err.message || "PDF upload failed");
+    } finally {
+      setPdfLoading(false);
+    }
   }
-}
 
   // ═══════════════════════════════════════════════════════════════
-  // ASSESSMENT UPLOAD
+  // ASSESSMENT UPLOAD (UNCHANGED)
   // ═══════════════════════════════════════════════════════════════
   async function handleAssessmentUpload() {
     setError("");
@@ -622,12 +655,10 @@ function UnifiedUploadForm({ faculty, prefill }) {
       if (!res.ok) throw new Error(data.error || "Upload failed");
 
       setAssessmentSuccess(true);
-      // Clear file + input after success
       setAssessmentFile(null);
       const fi = document.getElementById("assessment-file-input");
       if (fi) fi.value = "";
 
-      // Auto-collapse after 2.5s
       setTimeout(() => {
         setShowAssessmentUpload(false);
         setAssessmentSuccess(false);
@@ -663,9 +694,9 @@ function UnifiedUploadForm({ faculty, prefill }) {
   };
 
   const phaseLabel = {
-    sending: "⚡ Sending to server…",
-    uploading: `📤 Uploading — ${progressPct}%`,
-    saving: "💾 Saving metadata…",
+    preparing: "🔧 Preparing upload...",
+    uploading: `📤 Uploading— ${progressPct}%`,
+    saving: "💾 Saving metadata...",
     done: "✅ Done!",
   };
 
@@ -694,14 +725,14 @@ function UnifiedUploadForm({ faculty, prefill }) {
           </p>
         </div>
 
-        {/* Global error (only for things not tied to a section) */}
+        {/* Global error */}
         {error && (
           <div className="p-3 bg-red-50 border border-red-200 text-red-700 rounded-lg text-sm">
             {error}
           </div>
         )}
 
-        {/* Prefill context banner — shown when arriving from SubjectDetails */}
+        {/* Prefill context banner */}
         {prefill && (
           <div className="flex items-start gap-3 p-3 bg-blue-50 border border-blue-200 rounded-xl">
             <span className="text-lg mt-0.5">🔗</span>
@@ -716,7 +747,7 @@ function UnifiedUploadForm({ faculty, prefill }) {
           </div>
         )}
 
-        {/* ── Common Fields ── */}
+        {/* Common Fields */}
         <div className="bg-gray-50 border border-gray-200 rounded-xl p-5 space-y-4">
           <div className="flex items-center gap-2 mb-1">
             <span className="text-lg">📋</span>
@@ -788,14 +819,13 @@ function UnifiedUploadForm({ faculty, prefill }) {
           </div>
         </div>
 
-        {/* ── Video Upload Section ── */}
+        {/* Video Upload Section */}
         <div className="border border-blue-200 bg-blue-50 rounded-xl p-5 space-y-4">
           <div className="flex items-center gap-2">
             <span className="text-xl">🎥</span>
             <h3 className="text-sm font-bold text-blue-900">Upload Video</h3>
           </div>
 
-          {/* Show success state instead of file picker */}
           {videoSuccess ? (
             <div className="flex items-center gap-3 p-4 bg-green-50 border border-green-200 rounded-xl">
               <span className="text-2xl">✅</span>
@@ -890,12 +920,11 @@ function UnifiedUploadForm({ faculty, prefill }) {
           )}
         </div>
 
-        {/* ── PDF + Assessment row — compact buttons OR expanded panels ── */}
+        {/* PDF + Assessment Sections (UNCHANGED) */}
         <div className="flex flex-col gap-4">
 
           {/* PDF Section */}
           {!showPdfUpload ? (
-            /* Compact trigger button */
             <button
               onClick={() => setShowPdfUpload(true)}
               disabled={isAnyLoading}
@@ -904,7 +933,6 @@ function UnifiedUploadForm({ faculty, prefill }) {
               <span>📚</span> + Add Lecture Notes
             </button>
           ) : (
-            /* Expanded PDF panel */
             <div className="border border-orange-200 bg-orange-50 rounded-xl p-4 space-y-3">
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-2">
@@ -926,7 +954,6 @@ function UnifiedUploadForm({ faculty, prefill }) {
                 </button>
               </div>
 
-              {/* Success state — replaces file picker */}
               {pdfSuccess ? (
                 <div className="flex items-center gap-3 p-3 bg-green-50 border border-green-200 rounded-xl">
                   <span className="text-xl">✅</span>
@@ -967,7 +994,6 @@ function UnifiedUploadForm({ faculty, prefill }) {
 
           {/* Assessment Section */}
           {!showAssessmentUpload ? (
-            /* Compact trigger button */
             <button
               onClick={() => setShowAssessmentUpload(true)}
               disabled={isAnyLoading}
@@ -976,7 +1002,6 @@ function UnifiedUploadForm({ faculty, prefill }) {
               <span>📝</span> + Add Assessment
             </button>
           ) : (
-            /* Expanded Assessment panel */
             <div className="border border-purple-200 bg-purple-50 rounded-xl p-4 space-y-3">
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-2">
@@ -999,7 +1024,6 @@ function UnifiedUploadForm({ faculty, prefill }) {
                 </button>
               </div>
 
-              {/* Success state — replaces file picker */}
               {assessmentSuccess ? (
                 <div className="flex items-center gap-3 p-3 bg-green-50 border border-green-200 rounded-xl">
                   <span className="text-xl">✅</span>
@@ -1007,7 +1031,6 @@ function UnifiedUploadForm({ faculty, prefill }) {
                 </div>
               ) : (
                 <>
-                  {/* Template download */}
                   <div className="rounded-xl border border-purple-200 bg-white p-3">
                     <div className="flex items-start gap-2">
                       <span className="text-lg mt-0.5">📥</span>

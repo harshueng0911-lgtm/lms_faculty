@@ -3,7 +3,6 @@ const cors = require("cors");
 const multer = require("multer");
 const fs = require("fs");
 const path = require("path");
-const https = require("https");
 const { v4: uuidv4 } = require("uuid");
 const { google } = require("googleapis");
 const { createClient } = require("@supabase/supabase-js");
@@ -23,7 +22,7 @@ app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
 //////////////////////////////////////////////////////
-// 📁 LOCAL STORAGE
+// 📁 LOCAL STORAGE (for PDFs + Assessments only)
 //////////////////////////////////////////////////////
 
 const uploadDir = path.join(__dirname, "uploads");
@@ -70,21 +69,6 @@ const BUNNY_STORAGE_ZONE     = process.env.BUNNY_STORAGE_ZONE;     // osmania-lm
 const BUNNY_STORAGE_HOST     = process.env.BUNNY_STORAGE_HOST;     // sg.storage.bunnycdn.com
 const BUNNY_STORAGE_PASSWORD = process.env.BUNNY_STORAGE_PASSWORD;
 const BUNNY_CDN_URL          = process.env.BUNNY_CDN_URL;          // https://osmania-lms-cdn.b-cdn.net
-
-//////////////////////////////////////////////////////
-// 🔗 Persistent HTTPS agent for Bunny Storage
-// Keeps TCP connections alive between requests so each
-// upload doesn't pay the TLS handshake cost again.
-//////////////////////////////////////////////////////
-
-const bunnyAgent = new https.Agent({
-  keepAlive:            true,
-  keepAliveMsecs:       10_000,
-  maxSockets:           8,      // up to 8 parallel connections to Bunny
-  maxFreeSockets:       4,
-  scheduling:           "lifo",
-  timeout:              0,      // no socket idle timeout
-});
 
 //////////////////////////////////////////////////////
 // 🛠️ HELPERS
@@ -161,289 +145,88 @@ app.get("/test-drive", async (req, res) => {
 });
 
 //////////////////////////////////////////////////////
-// 🎬 BUNNY STORAGE — Streaming proxy upload
-//
-// POST /upload-video
-//
-// The browser sends the raw MP4 directly to this endpoint as
-// multipart/form-data (using multer disk storage). Node then
-// streams the file to Bunny Storage using a persistent HTTPS
-// agent — no RAM buffering, no base64, pure pipe().
-//
-// Why proxy instead of direct browser → Bunny PUT?
-//   • The Bunny Storage password never reaches the browser
-//   • Node's TCP stack saturates the uplink far better than a
-//     single browser XHR to a distant region (Singapore)
-//   • Progress is tracked server-side and streamed back via
-//     SSE on a separate endpoint (/upload-video-progress/:id)
-//   • In local dev the browser → localhost hop is effectively
-//     free, so the only real bottleneck is localhost → Bunny
-//
-// Flow:
-//   1. Browser POSTs file + metadata here (multipart)
-//   2. Server streams file → Bunny Storage via persistent agent
-//   3. Server saves metadata to Supabase
-//   4. Returns { cdnUrl, filePath }
-//
-// Body fields: file (MP4), faculty_id, faculty_name, department,
-//              year, semester, subject, unit, title
+// 🎬 NEW DIRECT UPLOAD ARCHITECTURE
 //////////////////////////////////////////////////////
 
-// Multer config for video — no size limit enforced here (validated
-// on the frontend); multer just writes to disk as it streams in.
-const videoUpload = multer({
-  dest:   "uploads/",
-  limits: { fileSize: 7 * 1024 * 1024 * 1024 }, // 7 GB hard cap
-});
+/**
+ * POST /create-video-upload
+ * 
+ * Returns upload configuration for direct browser → Bunny upload.
+ * 
+ * Body: { fileName, fileSize }
+ * 
+ * Returns:
+ * {
+ *   uploadUrl: "https://sg.storage.bunnycdn.com/...",
+ *   accessKey: "...",
+ *   cdnUrl: "https://osmania-lms-cdn.b-cdn.net/videos/...",
+ *   filePath: "videos/uuid-filename.mp4",
+ *   uploadId: "uuid"
+ * }
+ */
+app.post("/create-video-upload", async (req, res) => {
+  try {
+    const { fileName, fileSize } = req.body;
 
-// In-memory progress store: uploadId → { loaded, total, done, error }
-const progressStore = new Map();
+    if (!fileName) {
+      return res.status(400).json({ error: "fileName is required" });
+    }
 
-// Clean up stale progress entries after 10 minutes
-setInterval(() => {
-  const cutoff = Date.now() - 10 * 60 * 1000;
-  for (const [id, entry] of progressStore.entries()) {
-    if (entry.startedAt < cutoff) progressStore.delete(id);
-  }
-}, 60_000);
+    if (!fileSize || fileSize <= 0) {
+      return res.status(400).json({ error: "fileSize must be a positive number" });
+    }
 
-//////////////////////////////////////////////////////
-// GET /upload-video-progress/:uploadId
-// Server-Sent Events endpoint — frontend polls this for
-// real-time upload progress while the proxy streams to Bunny.
-//////////////////////////////////////////////////////
+    // Validate Bunny config
+    if (
+      !BUNNY_STORAGE_ZONE ||
+      !BUNNY_STORAGE_HOST ||
+      !BUNNY_STORAGE_PASSWORD ||
+      !BUNNY_CDN_URL
+    ) {
+      return res.status(500).json({ error: "Bunny Storage not configured" });
+    }
 
-app.get("/upload-video-progress/:uploadId", (req, res) => {
-  const { uploadId } = req.params;
+    // Validate MP4 extension
+    if (!fileName.toLowerCase().endsWith(".mp4")) {
+      return res.status(400).json({ error: "Only MP4 files are accepted" });
+    }
 
-  res.setHeader("Content-Type",  "text/event-stream");
-  res.setHeader("Cache-Control", "no-cache");
-  res.setHeader("Connection",    "keep-alive");
-  res.flushHeaders();
+    // Build safe file path
+    const safeName = path.basename(fileName).replace(/[^a-zA-Z0-9._\-]/g, "_");
+    const fileId   = uuidv4();
+    const filePath = `videos/${fileId}-${safeName}`;
 
-  const send = (data) => {
-    if (!res.writableEnded) res.write(`data: ${JSON.stringify(data)}\n\n`);
-  };
+    // Build upload URL
+    const uploadUrl = `https://${BUNNY_STORAGE_HOST}/${BUNNY_STORAGE_ZONE}/${filePath}`;
+    const cdnUrl    = `${BUNNY_CDN_URL}/${filePath}`;
 
-  const interval = setInterval(() => {
-    const entry = progressStore.get(uploadId);
-    if (!entry) { send({ status: "waiting" }); return; }
+    console.log(`[create-video-upload] Generated upload config for: ${fileName} (${fileSize} bytes)`);
 
-    send({
-      status:  entry.error ? "error"   :
-               entry.done  ? "done"    : "uploading",
-      loaded:  entry.loaded,
-      total:   entry.total,
-      error:   entry.error || null,
-      cdnUrl:  entry.cdnUrl || null,
+    return res.status(200).json({
+      uploadUrl,
+      accessKey: BUNNY_STORAGE_PASSWORD,
+      cdnUrl,
+      filePath,
+      uploadId: fileId,
     });
-
-    if (entry.done || entry.error) {
-      clearInterval(interval);
-      res.end();
-    }
-  }, 300); // send update every 300 ms
-
-  req.on("close", () => clearInterval(interval));
+  } catch (error) {
+    console.error("CREATE VIDEO UPLOAD ERROR:", error.message);
+    return res.status(500).json({ error: error.message });
+  }
 });
 
-//////////////////////////////////////////////////////
-// POST /upload-video — main streaming proxy
-//////////////////////////////////////////////////////
-
-app.post(
-  "/upload-video",
-  videoUpload.single("file"),
-  async (req, res) => {
-    // multer has already written the file to disk by the time we get here
-    const tempPath = req.file?.path;
-
-    const cleanup = () => {
-      if (tempPath && fs.existsSync(tempPath)) {
-        try { fs.unlinkSync(tempPath); } catch (_) {}
-      }
-    };
-
-    try {
-      if (!req.file) {
-        return res.status(400).json({ error: "No file received." });
-      }
-
-      // ── validate MIME / extension ──────────────────────────
-      const originalName = req.file.originalname || "";
-      const isMP4 =
-        req.file.mimetype === "video/mp4" ||
-        originalName.toLowerCase().endsWith(".mp4");
-
-      if (!isMP4) {
-        cleanup();
-        return res.status(400).json({ error: "Only MP4 files are accepted." });
-      }
-
-      if (
-        !BUNNY_STORAGE_ZONE ||
-        !BUNNY_STORAGE_HOST ||
-        !BUNNY_STORAGE_PASSWORD ||
-        !BUNNY_CDN_URL
-      ) {
-        cleanup();
-        return res.status(500).json({ error: "Bunny Storage not configured." });
-      }
-
-      // ── build storage path ─────────────────────────────────
-      const safeName = path.basename(originalName).replace(/[^a-zA-Z0-9._\-]/g, "_");
-      const fileId   = uuidv4();
-      const filePath = `videos/${fileId}-${safeName}`;
-      const cdnUrl   = `${BUNNY_CDN_URL}/${filePath}`;
-
-      // ── register progress entry ────────────────────────────
-      const uploadId  = fileId; // reuse uuid as the progress key
-      const fileSize  = req.file.size;
-
-      progressStore.set(uploadId, {
-        loaded:    0,
-        total:     fileSize,
-        done:      false,
-        error:     null,
-        cdnUrl:    null,
-        startedAt: Date.now(),
-      });
-
-      // ── respond immediately with uploadId + cdnUrl ─────────
-      // The frontend can start polling /upload-video-progress/:uploadId
-      // while the actual Bunny transfer happens asynchronously below.
-      res.json({ uploadId, cdnUrl, filePath });
-
-      // ── stream file → Bunny Storage (async, after response) ─
-      const bunnyPath = `/${BUNNY_STORAGE_ZONE}/${filePath}`;
-      const fileStream = fs.createReadStream(tempPath, {
-        highWaterMark: 512 * 1024, // 512 KB read chunks
-      });
-
-      const bunnyReq = https.request(
-        {
-          hostname: BUNNY_STORAGE_HOST,
-          path:     bunnyPath,
-          method:   "PUT",
-          agent:    bunnyAgent,
-          headers:  {
-            AccessKey:       BUNNY_STORAGE_PASSWORD,
-            "Content-Type":  "video/mp4",
-            "Content-Length": fileSize,
-          },
-        },
-        (bunnyRes) => {
-          let body = "";
-          bunnyRes.on("data", (d) => { body += d; });
-          bunnyRes.on("end", async () => {
-            const ok = bunnyRes.statusCode === 201 || bunnyRes.statusCode === 200;
-
-            if (!ok) {
-              console.error(`[Bunny] PUT failed — HTTP ${bunnyRes.statusCode}:`, body);
-              progressStore.set(uploadId, {
-                ...progressStore.get(uploadId),
-                error: `Bunny rejected upload (HTTP ${bunnyRes.statusCode}).`,
-              });
-              cleanup();
-              return;
-            }
-
-            console.log(`[Bunny] ✅ Upload complete: ${filePath}`);
-
-            // ── save metadata to Supabase ──────────────────
-            try {
-              const {
-                faculty_id, faculty_name, department,
-                year, semester, subject, unit, title,
-              } = req.body;
-
-              const { error: dbErr } = await supabase.from("videos").insert([{
-                faculty_id,
-                faculty_name: faculty_name || (await getFacultyName(faculty_id)),
-                department,
-                year:       Number(year),
-                semester:   semester ? Number(semester) : null,
-                subject,
-                unit,
-                title,
-                file_id:    filePath,
-                embed_url:  cdnUrl,
-                created_at: new Date().toISOString(),
-              }]);
-
-              if (dbErr) throw dbErr;
-
-              progressStore.set(uploadId, {
-                ...progressStore.get(uploadId),
-                loaded:  fileSize,
-                done:    true,
-                cdnUrl,
-              });
-
-              console.log("✅ Metadata saved:", filePath);
-            } catch (dbError) {
-              console.error("METADATA SAVE ERROR:", dbError.message);
-              progressStore.set(uploadId, {
-                ...progressStore.get(uploadId),
-                error: "Upload succeeded but metadata save failed: " + dbError.message,
-              });
-            }
-
-            cleanup();
-          });
-        }
-      );
-
-      bunnyReq.on("error", (err) => {
-        console.error("[Bunny] Stream error:", err.message);
-        progressStore.set(uploadId, {
-          ...progressStore.get(uploadId),
-          error: "Network error while uploading to Bunny: " + err.message,
-        });
-        cleanup();
-      });
-
-      // Track bytes written to Bunny so progress SSE works
-      let bytesWritten = 0;
-      fileStream.on("data", (chunk) => {
-        bytesWritten += chunk.length;
-        const entry = progressStore.get(uploadId);
-        if (entry && !entry.done && !entry.error) {
-          progressStore.set(uploadId, { ...entry, loaded: bytesWritten });
-        }
-      });
-
-      fileStream.on("error", (err) => {
-        console.error("[FileStream] read error:", err.message);
-        progressStore.set(uploadId, {
-          ...progressStore.get(uploadId),
-          error: "Failed to read temp file: " + err.message,
-        });
-        bunnyReq.destroy();
-        cleanup();
-      });
-
-      // Pipe the local temp file straight into the Bunny PUT request
-      fileStream.pipe(bunnyReq);
-
-    } catch (err) {
-      console.error("UPLOAD-VIDEO ERROR:", err.message);
-      cleanup();
-      // Response may already be sent (uploadId response) so guard carefully
-      if (!res.headersSent) {
-        res.status(500).json({ error: err.message });
-      }
-    }
-  }
-);
-
-//////////////////////////////////////////////////////
-// 💾 SAVE VIDEO METADATA (kept for backward compat)
-// This is now called internally by /upload-video after
-// the Bunny transfer completes. Exposed externally only
-// if you need a manual retry path.
-//////////////////////////////////////////////////////
-
+/**
+ * POST /save-video-metadata
+ * 
+ * Called by frontend after successful direct upload to Bunny.
+ * Saves video metadata to Supabase.
+ * 
+ * Body:
+ * {
+ *   filePath, cdnUrl, faculty_id, faculty_name,
+ *   department, year, semester, subject, unit, title
+ * }
+ */
 app.post("/save-video-metadata", async (req, res) => {
   try {
     const {
@@ -457,9 +240,11 @@ app.post("/save-video-metadata", async (req, res) => {
       });
     }
 
+    const resolvedFacultyName = faculty_name || (await getFacultyName(faculty_id));
+
     const { error } = await supabase.from("videos").insert([{
       faculty_id,
-      faculty_name: faculty_name || (await getFacultyName(faculty_id)),
+      faculty_name: resolvedFacultyName,
       department,
       year:       Number(year),
       semester:   semester ? Number(semester) : null,
@@ -476,7 +261,7 @@ app.post("/save-video-metadata", async (req, res) => {
     console.log("✅ Video metadata saved:", filePath);
     return res.status(200).json({ success: true, cdnUrl });
   } catch (error) {
-    console.error("SAVE METADATA ERROR:", error.message);
+    console.error("SAVE VIDEO METADATA ERROR:", error.message);
     return res.status(500).json({ error: error.message });
   }
 });
@@ -499,7 +284,7 @@ app.post("/upload-content", upload.single("file"), async (req, res) => {
     if (type === "video") {
       fs.unlinkSync(req.file.path);
       return res.status(400).json({
-        error: "Video uploads are not handled here. Use /upload-video instead.",
+        error: "Video uploads are not handled here. Use the video upload endpoint instead.",
       });
     }
 
@@ -587,35 +372,7 @@ app.post("/upload-assessment", upload.single("file"), async (req, res) => {
 });
 
 //////////////////////////////////////////////////////
-// 📈 Memory monitor
-//////////////////////////////////////////////////////
-
-setInterval(() => {
-  const mb = process.memoryUsage().rss / 1024 / 1024;
-  if (mb > 400) {
-    console.warn(`⚠️  High RSS memory: ${mb.toFixed(0)} MB`);
-  }
-}, 10_000);
-
-//////////////////////////////////////////////////////
-// 🚀 START SERVER
-//////////////////////////////////////////////////////
-
-const PORT = process.env.PORT || 5000;
-
-// Large body timeout — essential for 6 GB uploads.
-// expressTimeout is set per-request via server.setTimeout below.
-const server = app.listen(PORT, () => {
-  console.log(`Server running on port ${PORT}`);
-});
-
-// Allow up to 2 hours for a single request (covers very large files
-// on slow connections). Express's default is 2 minutes.
-server.setTimeout(2 * 60 * 60 * 1000); // 2 hours in ms
-server.keepAliveTimeout = 65_000;       // slightly above ALB/nginx defaults
-server.headersTimeout   = 66_000;
-//////////////////////////////////////////////////////
-// 🔐 FACULTY PASSWORD RESET (for dummy emails)
+// 🔐 FACULTY PASSWORD RESET (UNCHANGED)
 //////////////////////////////////////////////////////
 
 app.post("/reset-password", async (req, res) => {
@@ -680,3 +437,29 @@ app.post("/reset-password", async (req, res) => {
     });
   }
 });
+
+//////////////////////////////////////////////////////
+// 📈 Memory monitor
+//////////////////////////////////////////////////////
+
+setInterval(() => {
+  const mb = process.memoryUsage().rss / 1024 / 1024;
+  if (mb > 400) {
+    console.warn(`⚠️  High RSS memory: ${mb.toFixed(0)} MB`);
+  }
+}, 10_000);
+
+//////////////////////////////////////////////////////
+// 🚀 START SERVER
+//////////////////////////////////////////////////////
+
+const PORT = process.env.PORT || 5000;
+
+const server = app.listen(PORT, () => {
+  console.log(`Server running on port ${PORT}`);
+});
+
+// Standard timeout (no longer need 2 hours for video uploads)
+server.setTimeout(5 * 60 * 1000); // 5 minutes
+server.keepAliveTimeout = 65_000;
+server.headersTimeout   = 66_000;
