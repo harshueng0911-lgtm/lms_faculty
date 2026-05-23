@@ -24,7 +24,7 @@ const AboutUs = () => {
   return (
     <div className="bg-white text-gray-900 min-h-screen">
       {/* ══════════ NAVBAR (Matching HomePage) ══════════ */}
-      <nav className="fixed top-0 left-0 right-0 z-[9999] bg-white border-b border-gray-100 shadow-sm">
+      <nav className="fixed top-0 left-0 right-0 z-[9999] bg-white">
         <div className="max-w-screen-xl mx-auto px-8 h-[80px] flex items-center justify-between">
           {/* Logo */}
           <div className="flex items-center gap-3">

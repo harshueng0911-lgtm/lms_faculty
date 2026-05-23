@@ -28,7 +28,6 @@ function App() {
           path="/"
           element={
             <>
-              <Header />
               <main className="main-content">
                 <HomePage />
               </main>
