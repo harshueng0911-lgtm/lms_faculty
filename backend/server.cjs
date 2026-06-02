@@ -138,9 +138,20 @@ app.get("/", (req, res) => {
 app.get("/test-drive", async (req, res) => {
   try {
     const token = await driveOAuth2Client.getAccessToken();
-    res.json({ ok: true, accessTokenWorking: !!token?.token });
+
+    return res.json({
+      ok: true,
+      accessTokenWorking: !!token?.token,
+    });
   } catch (err) {
-    res.status(500).json({ ok: false, error: err.message });
+    console.error("TEST DRIVE FULL ERROR:");
+    console.error(err);
+
+    return res.status(500).json({
+      ok: false,
+      message: err.message,
+      response: err.response?.data || null,
+    });
   }
 });
 
