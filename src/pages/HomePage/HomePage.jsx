@@ -34,24 +34,31 @@ function useReveal(threshold = 0.12) {
   return [ref, visible];
 }
 
-/* ─── Reveal Wrapper ─── */
+/* ─── Reveal Wrapper with Enhanced Animation ─── */
 function Reveal({ children, delay = 0, direction = "up", className = "" }) {
   const [ref, visible] = useReveal();
 
   const hiddenMap = {
-    up: "opacity-0 translate-y-10",
-    left: "opacity-0 -translate-x-10",
-    right: "opacity-0 translate-x-10",
+    up: "opacity-0 translate-y-16",
+    left: "opacity-0 -translate-x-12",
+    right: "opacity-0 translate-x-12",
     fade: "opacity-0",
   };
 
+  const visibleMap = {
+    up: "opacity-100 translate-y-0",
+    left: "opacity-100 translate-x-0",
+    right: "opacity-100 translate-x-0",
+    fade: "opacity-100",
+  };
+
   const hidden = hiddenMap[direction] || hiddenMap.up;
+  const show = visibleMap[direction] || visibleMap.up;
 
   return (
     <div
       ref={ref}
-      className={`transition-all duration-700 ease-out ${visible ? "opacity-100 translate-x-0 translate-y-0" : hidden
-        } ${className}`}
+      className={`transition-all duration-1000 ease-out ${visible ? show : hidden} ${className}`}
       style={{ transitionDelay: `${delay}ms` }}
     >
       {children}
@@ -59,6 +66,27 @@ function Reveal({ children, delay = 0, direction = "up", className = "" }) {
   );
 }
 
+/* ─── Image Container with Enhanced Shadow ─── */
+function ImageContainer({ src, alt, className = "", shadow = "heavy" }) {
+  const shadowMap = {
+    light: "shadow-2xl shadow-gray-300",
+    medium: "shadow-3xl shadow-gray-400",
+    heavy: "shadow-3xl shadow-blue-300",
+    blue: "shadow-4xl shadow-blue-400",
+    slate: "shadow-4xl shadow-slate-400",
+  };
+
+  return (
+    <div
+      className={`relative rounded-3xl overflow-hidden ${shadowMap[shadow]} bg-gradient-to-br from-gray-50 to-gray-100 ${className}`}
+    >
+      <div className="absolute inset-0 bg-gradient-to-br from-white/20 via-transparent to-transparent pointer-events-none" />
+      <img src={src} alt={alt} className="w-full h-full object-cover" />
+    </div>
+  );
+}
+
+/* ─── Check Circle ─── */
 function CheckCircle({ color = "text-blue-500" }) {
   return (
     <svg
@@ -74,11 +102,11 @@ function CheckCircle({ color = "text-blue-500" }) {
   );
 }
 
+/* ─── Chevron Down ─── */
 function ChevronDown({ open }) {
   return (
     <svg
-      className={`w-5 h-5 text-gray-400 transition-transform duration-300 flex-shrink-0 ${open ? "rotate-180" : ""
-        }`}
+      className={`w-5 h-5 text-gray-400 transition-transform duration-300 flex-shrink-0 ${open ? "rotate-180" : ""}`}
       fill="none"
       viewBox="0 0 24 24"
       stroke="currentColor"
@@ -89,6 +117,7 @@ function ChevronDown({ open }) {
   );
 }
 
+/* ─── Main HomePage Component ─── */
 const HomePage = () => {
   const [faqOpen, setFaqOpen] = useState(null);
   const navigate = useNavigate();
@@ -163,14 +192,14 @@ const HomePage = () => {
 
   return (
     <div className="bg-white text-gray-900 overflow-x-hidden">
-      {/* ══════════ SINGLE MAIN NAVBAR ══════════ */}
-      <nav className="fixed top-0 left-0 right-0 z-[9999] bg-white">
+      {/* ══════════ FIXED NAVBAR ══════════ */}
+      <nav className="fixed top-0 left-0 right-0 z-[9999] bg-white border-b border-gray-100 backdrop-blur-xl bg-white/95">
         <div className="max-w-screen-xl mx-auto px-6 md:px-8 h-[80px] flex items-center justify-between">
           <div className="flex items-center gap-3">
             <img
               src={oulogo}
               alt="Osmania University Engineering College Logo"
-              className="w-11 h-11 rounded-lg object-contain"
+              className="w-11 h-11 rounded-lg object-contain shadow-md"
             />
 
             <div>
@@ -186,14 +215,14 @@ const HomePage = () => {
           <div className="hidden md:flex items-center gap-10">
             <button
               onClick={() => window.scrollTo({ top: 0, behavior: "smooth" })}
-              className="text-gray-700 font-medium hover:text-blue-600 transition-colors"
+              className="text-gray-700 font-medium hover:text-blue-600 transition-colors duration-300"
             >
               Home
             </button>
 
             <a
               href="#faq"
-              className="text-gray-700 font-medium hover:text-blue-600 transition-colors"
+              className="text-gray-700 font-medium hover:text-blue-600 transition-colors duration-300"
             >
               FAQ's
             </a>
@@ -203,7 +232,7 @@ const HomePage = () => {
                 window.scrollTo(0, 0);
                 navigate("/about");
               }}
-              className="text-gray-700 font-medium hover:text-blue-600 transition-colors"
+              className="text-gray-700 font-medium hover:text-blue-600 transition-colors duration-300"
             >
               About us
             </button>
@@ -212,15 +241,17 @@ const HomePage = () => {
           <div className="flex items-center gap-3 md:gap-4">
             <button
               onClick={() => navigate("/faculty/login")}
-              className="px-4 md:px-6 py-2.5 md:py-3 border border-gray-300 rounded-xl text-gray-700 font-medium hover:bg-gray-50 transition text-sm md:text-base"
+              className="px-4 md:px-6 py-2.5 md:py-3 border-2 border-gray-300 rounded-xl text-gray-700 font-medium hover:bg-gray-50 hover:border-blue-400 transition duration-300 text-sm md:text-base shadow-lg shadow-gray-300 hover:shadow-blue-300 relative group overflow-hidden"
             >
+              <div className="absolute inset-0 bg-gradient-to-r from-white/40 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-300" />
               Sign in
             </button>
 
             <button
               onClick={() => navigate("/faculty/signup")}
-              className="px-4 md:px-6 py-2.5 md:py-3 bg-blue-600 hover:bg-blue-700 text-white rounded-xl font-semibold transition text-sm md:text-base"
+              className="px-4 md:px-6 py-2.5 md:py-3 bg-gradient-to-r from-blue-600 to-blue-700 hover:from-blue-700 hover:to-blue-800 text-white rounded-xl font-semibold transition duration-300 text-sm md:text-base shadow-2xl shadow-blue-400 hover:shadow-blue-500 relative group overflow-hidden"
             >
+              <div className="absolute inset-0 bg-gradient-to-r from-white/30 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-300 animate-pulse" />
               Get started
             </button>
           </div>
@@ -229,85 +260,90 @@ const HomePage = () => {
 
       <div className="h-[80px]" />
 
-      {/* ══════════ HERO ══════════ */}
-      <section className="bg-white">
-        <div className="max-w-screen-xl mx-auto px-6 md:px-8 py-16 md:py-20 flex flex-col lg:flex-row items-center gap-12 lg:gap-16">
-          <div className="flex-1 max-w-[580px]">
-            <Reveal direction="up">
-              <h1 className="text-4xl md:text-5xl lg:text-[64px] font-black text-gray-900 leading-[1.08] tracking-tight mb-5">
-                The Digital Hub
-                <br />
-                <span className="text-blue-600">of Learning</span>
-              </h1>
+      {/* ══════════ HERO SECTION ══════════ */}
+      <section className="bg-white relative overflow-hidden">
+        <div className="absolute inset-0 bg-gradient-to-br from-blue-50/30 via-transparent to-transparent pointer-events-none" />
+        
+        <div className="max-w-screen-xl mx-auto px-6 md:px-8 py-16 md:py-28 flex flex-col lg:flex-row items-center gap-12 lg:gap-16">
+          <Reveal direction="up" className="flex-1 max-w-[580px]">
+            <h1 className="text-5xl md:text-6xl lg:text-7xl font-black text-gray-900 leading-[1.08] tracking-tight mb-6">
+              The Digital Hub
+              <br />
+              <span className="bg-gradient-to-r from-blue-600 to-blue-700 bg-clip-text text-transparent">
+                of Learning
+              </span>
+            </h1>
 
-              <p className="text-gray-500 text-lg leading-relaxed mb-8 max-w-[480px]">
-                Your official gateway to the Osmania University learning
-                ecosystem. Faculty can manage academic content, and students can
-                access lecture videos, notes, and assessments from one digital
-                platform.
-              </p>
+            <p className="text-gray-500 text-lg leading-relaxed mb-8 max-w-[480px]">
+              Your official gateway to the Osmania University learning
+              ecosystem. Faculty can manage academic content, and students can
+              access lecture videos, notes, and assessments from one digital
+              platform.
+            </p>
 
-              <div className="flex items-center gap-3 mb-12 flex-wrap">
-                <button
-                  onClick={() => navigate("/faculty/signup")}
-                  className="inline-flex items-center gap-2 bg-blue-600 hover:bg-blue-700 text-white font-semibold px-6 py-3 rounded-xl text-sm transition-all shadow-lg shadow-blue-200"
+            <div className="flex items-center gap-3 mb-12 flex-wrap">
+              <button
+                onClick={() => navigate("/faculty/signup")}
+                className="inline-flex items-center gap-2 bg-gradient-to-r from-blue-600 to-blue-700 hover:from-blue-700 hover:to-blue-800 text-white font-semibold px-7 py-3.5 rounded-xl text-sm transition-all duration-300 shadow-2xl shadow-blue-400 hover:shadow-blue-500 transform hover:scale-105 relative group overflow-hidden"
+              >
+                <div className="absolute inset-0 bg-gradient-to-r from-white/30 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-300 animate-pulse" />
+                Faculty Registration
+                <svg
+                  className="w-4 h-4"
+                  fill="none"
+                  viewBox="0 0 24 24"
+                  stroke="currentColor"
+                  strokeWidth={2.5}
                 >
-                  Faculty Registration
-                  <svg
-                    className="w-4 h-4"
-                    fill="none"
-                    viewBox="0 0 24 24"
-                    stroke="currentColor"
-                    strokeWidth={2.5}
-                  >
-                    <path
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                      d="M9 5l7 7-7 7"
-                    />
-                  </svg>
-                </button>
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    d="M9 5l7 7-7 7"
+                  />
+                </svg>
+              </button>
 
-                <button
-                  onClick={() => navigate("/faculty/login")}
-                  className="px-6 py-3 rounded-xl border border-gray-200 text-gray-700 font-semibold text-sm hover:bg-gray-50 transition-colors"
-                >
-                  Faculty Login
-                </button>
+              <button
+                onClick={() => navigate("/faculty/login")}
+                className="px-7 py-3.5 rounded-xl border-2 border-gray-300 text-gray-700 font-semibold text-sm hover:bg-gray-50 hover:border-blue-400 transition-all duration-300 relative group overflow-hidden shadow-lg shadow-gray-300 hover:shadow-blue-300"
+              >
+                <div className="absolute inset-0 bg-gradient-to-r from-white/40 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-300" />
+                Faculty Login
+              </button>
+            </div>
+
+            <div className="flex items-center">
+              <div className="pr-8 md:pr-10">
+                <p className="text-4xl font-black bg-gradient-to-r from-blue-600 to-blue-700 bg-clip-text text-transparent">
+                  24/7
+                </p>
+                <p className="text-sm text-gray-400 mt-1">Digital Access</p>
               </div>
 
-              <div className="flex items-center">
-                <div className="pr-8 md:pr-10">
-                  <p className="text-3xl font-black text-gray-900">24/7</p>
-                  <p className="text-sm text-gray-400 mt-1">Digital Access</p>
-                </div>
+              <div className="w-px h-12 bg-gradient-to-b from-gray-200 to-transparent" />
 
-                <div className="w-px h-12 bg-gray-200" />
-
-                <div className="pl-8 md:pl-10">
-                  <p className="text-3xl font-black text-gray-900">1</p>
-                  <p className="text-sm text-gray-400 mt-1">Unified Portal</p>
-                </div>
+              <div className="pl-8 md:pl-10">
+                <p className="text-4xl font-black bg-gradient-to-r from-blue-600 to-blue-700 bg-clip-text text-transparent">
+                  1
+                </p>
+                <p className="text-sm text-gray-400 mt-1">Unified Portal</p>
               </div>
-            </Reveal>
-          </div>
+            </div>
+          </Reveal>
 
-          <Reveal
-            direction="right"
-            delay={150}
-            className="flex-1 w-full max-w-[700px]"
-          >
-            <div className="relative">
-              <div className="rounded-3xl overflow-hidden shadow-2xl shadow-gray-200 bg-gray-50">
-                <img
-                  src={oueng}
-                  alt="Osmania University College of Engineering"
-                  className="w-full h-[320px] md:h-[430px] object-cover"
-                />
-              </div>
+          <Reveal direction="right" delay={200} className="flex-1 w-full max-w-[700px]">
+            <div className="relative group">
+              <div className="absolute inset-0 bg-gradient-to-r from-blue-400 to-blue-600 rounded-3xl blur-3xl opacity-40 group-hover:opacity-50 transition duration-1000" />
+              
+              <ImageContainer
+                src={oueng}
+                alt="Osmania University College of Engineering"
+                className="w-full h-[320px] md:h-[430px]"
+                shadow="blue"
+              />
 
-              <div className="absolute -bottom-6 left-6 md:left-8 bg-white rounded-2xl shadow-xl shadow-gray-200 px-5 py-3.5 flex items-center gap-3 border border-gray-100">
-                <div className="w-9 h-9 bg-blue-600 rounded-xl flex items-center justify-center flex-shrink-0">
+              <div className="absolute -bottom-6 left-6 md:left-8 bg-white/80 backdrop-blur-xl rounded-2xl shadow-2xl shadow-blue-400 px-5 py-3.5 flex items-center gap-3 border border-blue-200 hover:shadow-blue-500 transition-all duration-300 group/badge">
+                <div className="w-9 h-9 bg-gradient-to-r from-blue-600 to-blue-700 rounded-xl flex items-center justify-center flex-shrink-0 shadow-lg shadow-blue-300">
                   <svg
                     className="w-5 h-5 text-white"
                     fill="currentColor"
@@ -318,7 +354,7 @@ const HomePage = () => {
                 </div>
 
                 <div>
-                  <p className="text-[10px] font-bold text-gray-400 uppercase tracking-wider">
+                  <p className="text-[10px] font-bold text-blue-600 uppercase tracking-wider">
                     Official LMS
                   </p>
                   <p className="text-sm font-bold text-gray-900">
@@ -332,27 +368,30 @@ const HomePage = () => {
       </section>
 
       {/* ══════════ FEATURED PROGRAM ══════════ */}
-      <section className="bg-gray-50 py-20 px-6 md:px-8 mt-8">
+      <section className="bg-gradient-to-br from-blue-50 via-white to-gray-50 py-20 px-6 md:px-8 mt-12">
         <div className="max-w-3xl mx-auto text-center">
           <Reveal direction="fade">
-            <div className="inline-flex items-center gap-2 mb-5">
-              <span className="w-2 h-2 rounded-full bg-blue-500" />
-              <span className="text-sm font-semibold text-blue-600">
-                Government of Telangana Initiative
-              </span>
-            </div>
+            <div className="mb-6 inline-flex items-center gap-2 rounded-full bg-blue-50 px-4 py-1.5 text-sm font-semibold text-blue-700">
+        <span className="relative flex h-2 w-2">
+          <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-blue-400 opacity-75"></span>
+          <span className="relative inline-flex rounded-full h-2 w-2 bg-blue-600"></span>
+        </span>
+        Government of Telangana Initiative
+      </div>
           </Reveal>
 
           <Reveal direction="up" delay={80}>
-            <h2 className="text-3xl md:text-4xl font-black text-gray-900 mb-5 leading-tight">
+            <h2 className="text-3xl md:text-4xl lg:text-5xl font-black text-gray-900 mb-5 leading-tight">
               Prajapala Palana Pragati Pranalika:
               <br />
-              <span className="text-blue-600">The 99-Day Action Plan</span>
+              <span className="bg-gradient-to-r from-blue-600 to-blue-700 bg-clip-text text-transparent">
+                The 99-Day Action Plan
+              </span>
             </h2>
           </Reveal>
 
           <Reveal direction="up" delay={160}>
-            <p className="text-gray-500 text-base leading-relaxed">
+            <p className="text-gray-600 text-base leading-relaxed">
               Guided by a visionary mandate for the digitization of student
               services, Osmania University is proud to support a Learning
               Management System that strengthens academic access, faculty
@@ -367,12 +406,15 @@ const HomePage = () => {
         <div className="max-w-screen-xl mx-auto">
           <div className="flex flex-col lg:flex-row gap-14 lg:gap-16 items-start">
             <Reveal direction="up" className="lg:w-[400px] flex-shrink-0">
-              <p className="text-xs font-bold text-green-500 tracking-widest uppercase mb-4">
+              <p className="text-xs font-bold text-blue-600 tracking-widest uppercase mb-4">
                 For Students
               </p>
 
               <h2 className="text-3xl md:text-4xl font-black text-gray-900 leading-tight mb-4">
-                Learn anywhere. Revise anytime.
+                Learn anywhere.{" "}
+                <span className="bg-gradient-to-r from-blue-600 to-blue-700 bg-clip-text text-transparent">
+                  Revise anytime.
+                </span>
               </h2>
 
               <p className="text-gray-500 text-base mb-8">
@@ -380,7 +422,7 @@ const HomePage = () => {
                 assessments in a structured academic format.
               </p>
 
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-3.5 mb-10">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-4 mb-10">
                 {[
                   "Subject-wise learning materials",
                   "Unit-wise lecture videos",
@@ -389,25 +431,34 @@ const HomePage = () => {
                   "Year and semester-wise organization",
                   "Self-paced revision support",
                 ].map((f, i) => (
-                  <div key={i} className="flex items-start gap-2">
-                    <CheckCircle color="text-blue-500" />
-                    <span className="text-sm text-gray-600 leading-snug">
-                      {f}
-                    </span>
-                  </div>
+                  <Reveal key={i} direction="up" delay={i * 40}>
+                    <div className="flex items-start gap-3">
+                      <CheckCircle color="text-blue-500" />
+                      <span className="text-sm text-gray-700 leading-snug font-medium">
+                        {f}
+                      </span>
+                    </div>
+                  </Reveal>
                 ))}
               </div>
             </Reveal>
 
-            <div className="flex-1 grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <div className="flex-1 grid grid-cols-1 sm:grid-cols-2 gap-6">
               {courseCards.map((card, i) => (
-                <Reveal key={i} direction="up" delay={i * 80}>
-                  <div className="bg-white rounded-2xl overflow-hidden border border-gray-100 shadow-sm">
-                    <div className="h-52 md:h-56 overflow-hidden bg-gray-50 flex items-center justify-center">
+                <Reveal
+                  key={i}
+                  direction={i % 2 === 0 ? "up" : "up"}
+                  delay={i * 100}
+                  className="h-full"
+                >
+                  <div className="bg-white rounded-2xl overflow-hidden border border-gray-100 shadow-2xl shadow-gray-300 hover:shadow-3xl hover:shadow-blue-300 transition-all duration-500 group hover:-translate-y-2 relative overflow-hidden">
+                    <div className="absolute inset-0 bg-gradient-to-r from-white/40 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-300 pointer-events-none" />
+                    <div className="h-52 md:h-56 overflow-hidden bg-gradient-to-br from-gray-100 to-gray-50 flex items-center justify-center relative">
+                      <div className="absolute inset-0 bg-gradient-to-br from-white/20 via-transparent to-transparent" />
                       <img
                         src={card.src}
                         alt={card.title}
-                        className="w-full h-full object-contain object-center p-3"
+                        className="w-full h-full object-contain object-center p-3 group-hover:scale-110 transition-transform duration-500"
                       />
                     </div>
 
@@ -429,7 +480,7 @@ const HomePage = () => {
       <section className="bg-white py-20 md:py-24 px-6 md:px-8">
         <div className="max-w-screen-xl mx-auto">
           <Reveal direction="fade" className="text-center mb-16">
-            <div className="inline-flex items-center gap-2 border border-gray-200 rounded-full px-4 py-1.5 mb-5 shadow-sm">
+           
               <svg
                 className="w-3.5 h-3.5 text-blue-400"
                 fill="currentColor"
@@ -442,278 +493,486 @@ const HomePage = () => {
                 />
               </svg>
 
-              <span className="text-xs font-semibold text-gray-500 uppercase tracking-widest">
-                Osmania University LMS
-              </span>
-            </div>
+             <div className="mb-6 inline-flex items-center gap-2 rounded-full bg-blue-50 px-4 py-1.5 text-sm font-semibold text-blue-700">
+        <span className="relative flex h-2 w-2">
+          <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-blue-400 opacity-75"></span>
+          <span className="relative inline-flex rounded-full h-2 w-2 bg-blue-600"></span>
+        </span>
+        osmania university initiative
+      </div>
+            
 
-            <h2 className="text-3xl md:text-4xl font-black text-gray-900">
+            <h2 className="text-3xl md:text-4xl lg:text-5xl font-black text-gray-900 mb-6">
               A Commitment to{" "}
-              <span className="text-blue-600">Academic Excellence</span>
+              <span className="bg-gradient-to-r from-blue-600 to-blue-700 bg-clip-text text-transparent">
+                Academic Excellence
+              </span>
             </h2>
           </Reveal>
 
-          <div className="flex flex-col lg:flex-row items-center gap-14 mb-20 md:mb-24">
-            <Reveal direction="left" delay={80} className="lg:w-[55%]">
-              <div className="relative rounded-3xl overflow-hidden shadow-2xl shadow-blue-100/50 bg-gray-50 flex items-center justify-center min-h-[420px] md:min-h-[520px]">
-                <img
+          {/* Vice-Chancellor Section */}
+          <div className="flex flex-col lg:flex-row items-center gap-14 mb-20 md:mb-32">
+            <Reveal direction="left" delay={100} className="lg:w-[55%]">
+              <div className="relative group">
+                <div className="absolute -inset-6 bg-gradient-to-br from-blue-400 to-blue-600 rounded-3xl blur-3xl opacity-40 group-hover:opacity-50 transition duration-1000" />
+                
+                <ImageContainer
                   src={viceChancellorImg}
                   alt="Vice-Chancellor"
-                  className="w-full h-auto max-h-[520px] object-contain"
+                  className="min-h-[420px] md:min-h-[520px] relative"
+                  shadow="blue"
                 />
 
-                <div className="absolute bottom-0 left-0 right-0 bg-black/30 backdrop-blur-sm px-5 py-4 flex items-center justify-between">
-                  <span className="text-white text-sm font-medium">
+                <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/70 via-black/40 to-transparent backdrop-blur-sm px-6 py-6 rounded-b-3xl">
+                  <span className="text-white text-sm font-semibold">
                     Message from the Vice-Chancellor
                   </span>
                 </div>
               </div>
             </Reveal>
 
-            <Reveal direction="right" delay={160} className="lg:w-[45%]">
-              <p className="text-xs font-bold text-blue-600 tracking-widest uppercase mb-3">
-                Academic Vision
-              </p>
+            <Reveal direction="right" delay={200} className="lg:w-[45%]">
+              <div className="bg-white/40 backdrop-blur-2xl border border-white/60 rounded-3xl p-8 shadow-2xl shadow-blue-200">
+                <p className="text-xs font-bold text-blue-600 tracking-widest uppercase mb-4">
+                  Academic Vision
+                </p>
 
-              <h3 className="text-3xl font-black text-gray-900 leading-tight mb-5">
-                Message from the Vice-Chancellor
-              </h3>
+                <h3 className="text-3xl md:text-4xl font-black text-gray-900 leading-tight mb-6">
+                  Message from the Vice-Chancellor
+                </h3>
 
-              <p className="text-gray-500 text-base leading-relaxed mb-8">
-                At Osmania University, digital learning strengthens academic
-                access and supports students beyond classroom hours. This LMS
-                reflects the university’s commitment to structured, accessible,
-                and technology-enabled education.
-              </p>
+                <p className="text-gray-700 text-base leading-relaxed mb-6 font-medium">
+                  At Osmania University, digital learning strengthens academic
+                  access and supports students beyond classroom hours. This LMS
+                  reflects the university's commitment to structured, accessible,
+                  and technology-enabled education.
+                </p>
+
+                <p className="text-gray-600 text-sm leading-relaxed">
+                  Our vision is to empower every student with the resources they need to excel, while enabling faculty to deliver engaging and impactful educational experiences in the digital age.
+                </p>
+              </div>
             </Reveal>
           </div>
 
+          {/* Principal Section */}
           <div className="flex flex-col lg:flex-row-reverse items-center gap-14">
-            <Reveal direction="right" delay={80} className="lg:w-[55%]">
-              <div className="relative rounded-3xl overflow-hidden shadow-2xl shadow-gray-200/60 bg-gray-50 flex items-center justify-center min-h-[420px] md:min-h-[520px]">
-                <img
+            <Reveal direction="right" delay={100} className="lg:w-[55%]">
+              <div className="relative group">
+                <div className="absolute -inset-6 bg-gradient-to-br from-blue-400 to-blue-600 rounded-3xl blur-3xl opacity-40 group-hover:opacity-50 transition duration-1000" />
+                
+                <ImageContainer
                   src={principalImg}
                   alt="Principal"
-                  className="w-full h-auto max-h-[520px] object-contain"
+                  className="min-h-[420px] md:min-h-[520px] relative"
+                  shadow="blue"
                 />
 
-                <div className="absolute bottom-0 left-0 right-0 bg-black/30 backdrop-blur-sm px-5 py-4 flex items-center justify-between">
-                  <span className="text-white text-sm font-medium">
+                <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/70 via-black/40 to-transparent backdrop-blur-sm px-6 py-6 rounded-b-3xl">
+                  <span className="text-white text-sm font-semibold">
                     Message from the Principal
                   </span>
                 </div>
               </div>
             </Reveal>
 
-            <Reveal direction="left" delay={160} className="lg:w-[45%]">
-              <p className="text-xs font-bold text-blue-600 tracking-widest uppercase mb-3">
-                Engineering Education
-              </p>
+            <Reveal direction="left" delay={200} className="lg:w-[45%]">
+              <div className="bg-white/40 backdrop-blur-2xl border border-white/60 rounded-3xl p-8 shadow-2xl shadow-slate-300">
+                <p className="text-xs font-bold text-blue-600 tracking-widest uppercase mb-4">
+                  Engineering Education
+                </p>
 
-              <h3 className="text-3xl font-black text-gray-900 leading-tight mb-5">
-                Message from the Principal
-              </h3>
+                <h3 className="text-3xl md:text-4xl font-black text-gray-900 leading-tight mb-6">
+                  Message from the Principal
+                </h3>
 
-              <p className="text-gray-500 text-base leading-relaxed mb-8">
-                Engineering education requires continuous access to quality
-                academic resources. This LMS helps faculty organize learning
-                materials and helps students revise lessons, access notes, and
-                complete assessments with ease.
-              </p>
+                <p className="text-gray-700 text-base leading-relaxed mb-6 font-medium">
+                  Engineering education requires continuous access to quality
+                  academic resources. This LMS helps faculty organize learning
+                  materials and helps students revise lessons, access notes, and
+                  complete assessments with ease.
+                </p>
+
+                <p className="text-gray-600 text-sm leading-relaxed">
+                  We are committed to leveraging technology to enhance learning outcomes and prepare our students for success in their careers.
+                </p>
+              </div>
             </Reveal>
           </div>
         </div>
       </section>
 
-      {/* ══════════ BUILT FOR FACULTY & STUDENTS ══════════ */}
-      <section className="bg-white py-24 px-6 md:px-8">
+      {/* ══════════ BUILT FOR FACULTY & STUDENTS — ENHANCED ══════════ */}
+      <section className="bg-white py-20 md:py-24 px-6 md:px-8">
         <div className="max-w-screen-xl mx-auto">
-          <Reveal direction="up" className="text-center mb-14">
-            <p className="text-xs font-bold text-gray-400 tracking-widest uppercase mb-3">
+          <Reveal direction="up" className="text-center mb-16">
+            <div className="mb-6 inline-flex items-center gap-2 rounded-full bg-blue-50 px-4 py-1.5 text-sm font-semibold text-blue-700">
+              <span className="relative flex h-2 w-2">
+                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-blue-400 opacity-75"></span>
+                <span className="relative inline-flex rounded-full h-2 w-2 bg-blue-600"></span>
+              </span>
               ONE PLATFORM · TWO WORLDS
-            </p>
+            </div>
 
-            <h2 className="text-3xl md:text-4xl font-black text-gray-900 mb-4">
-              Built for faculty{" "}
-              <span className="text-gray-400">&amp;</span> students
+            <h2 className="text-3xl md:text-4xl lg:text-5xl font-black text-gray-900 mb-4">
+              Built for{" "}
+              <span className="bg-gradient-to-r from-blue-600 to-blue-700 bg-clip-text text-transparent">
+                faculty & students
+              </span>
             </h2>
 
-            <p className="text-gray-500 text-base max-w-2xl mx-auto">
-              A dedicated academic workspace for faculty to manage course
-              content and a simple student portal to access learning resources.
+            <p className="text-gray-600 text-base max-w-2xl mx-auto">
+              A dedicated academic workspace for faculty to manage course content and a simple student portal to access learning resources.
             </p>
           </Reveal>
 
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-7">
-            {/* Faculty Portal Card */}
-            <Reveal direction="left" delay={80}>
-              <div className="rounded-3xl overflow-hidden bg-[#0B2F66] shadow-xl shadow-blue-100 border border-blue-100">
-                <div className="relative h-[300px] md:h-[340px] bg-blue-50 overflow-hidden">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-8 items-stretch">
+
+            {/* ── Faculty Portal Card ── */}
+            <Reveal direction="left" delay={120} className="h-full">
+              <div className="flex flex-col h-full rounded-3xl overflow-hidden transition-all duration-500 group relative"
+                   style={{ background: "linear-gradient(160deg, rgba(59,130,246,0.08) 0%, rgba(37,99,235,0.04) 100%)" }}>
+                {/* Decorative Blur Blobs */}
+                <div className="absolute -top-20 -right-20 w-40 h-40 bg-blue-400/10 rounded-full blur-3xl group-hover:bg-blue-400/15 transition-all duration-500" />
+                <div className="absolute -bottom-20 -left-20 w-32 h-32 bg-blue-600/5 rounded-full blur-2xl" />
+                
+                {/* Main Border Gradient */}
+                <div className="absolute inset-0 rounded-3xl pointer-events-none" style={{
+                  background: "linear-gradient(135deg, rgba(147,197,253,0.2) 0%, transparent 50%, rgba(37,99,235,0.1) 100%)",
+                }} />
+                
+                <div className="absolute inset-0 rounded-3xl shadow-2xl shadow-blue-400/20 group-hover:shadow-blue-500/30 transition-all duration-500 pointer-events-none" />
+                
+                {/* Inner Border */}
+                <div className="absolute inset-[1px] rounded-3xl border border-gradient-to-br from-blue-300/30 via-blue-200/10 to-blue-300/20 pointer-events-none" />
+
+                {/* IMAGE — fixed height, fully visible */}
+                <div className="relative w-full h-[300px] overflow-hidden flex-shrink-0 z-10">
                   <img
                     src={facul}
-                    alt="Osmania University Faculty Portal"
-                    className="w-full h-full object-cover object-center"
+                    alt="Faculty Portal"
+                    className="w-full h-full object-cover object-center group-hover:scale-105 transition-transform duration-700"
                   />
-
-                  <div className="absolute inset-x-0 bottom-0 h-24 bg-gradient-to-t from-[#0B2F66] to-transparent" />
-
-                  <div className="absolute top-5 left-5 bg-white/95 backdrop-blur rounded-xl px-3 py-1.5 flex items-center gap-2 shadow-sm">
-                    <svg
-                      className="w-3.5 h-3.5 text-blue-600"
-                      fill="none"
-                      viewBox="0 0 24 24"
-                      stroke="currentColor"
-                      strokeWidth={2}
-                    >
-                      <path
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                        d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12"
-                      />
+                  <div className="absolute inset-0 bg-gradient-to-t from-black/30 via-transparent to-transparent" />
+                  <div className="absolute top-4 left-4 flex items-center gap-2 px-3 py-1.5 rounded-xl shadow-md"
+                       style={{ background: "rgba(37,99,235,0.5)", backdropFilter: "blur(12px)", border: "1px solid rgba(147,197,253,0.4)" }}>
+                    <svg className="w-3.5 h-3.5 text-blue-100" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" />
                     </svg>
-                    <span className="text-xs font-bold text-gray-700 tracking-wider uppercase">
-                      Faculty Portal
-                    </span>
+                    <span className="text-[11px] font-bold text-blue-50 tracking-wider uppercase">Faculty Portal</span>
                   </div>
                 </div>
 
-                <div className="p-8 pt-7">
-                  <h3 className="text-3xl font-black text-white mb-3">
-                    Manage academic content
-                  </h3>
+                {/* TRANSPARENT BLUE GLASS CARD — below image, grows to fill */}
+             <div className="flex-1 p-6 bg-transparent z-20 relative">
+                  <div
+  className="h-full rounded-2xl p-7 flex flex-col"
+  style={{
+    background: "rgba(255,255,255,0.03)",
+    border: "1px solid #2563eb",
+    boxShadow: `
+      0 0 0 2px rgba(37,99,235,0.25),
+      0 15px 35px rgba(37,99,235,0.15)
+    `,
+  }}
+>
 
-                  <p className="text-blue-100 text-sm leading-relaxed mb-5">
-                    The faculty portal helps teachers upload, organize, preview,
-                    and manage learning resources in a structured academic
-                    format.
-                  </p>
+                    <div className="absolute -top-3 left-8 w-24 h-1 bg-gradient-to-r from-blue-400/0 via-blue-400/40 to-blue-400/0 rounded-full blur(20px)" />
 
-                  <ul className="space-y-2.5">
-                    {[
-                      "Upload lecture videos, notes, and assessment files",
-                      "Organize content by year, semester, subject, and unit",
-                      "Preview PDFs and assessments before students access them",
-                      "Update or delete outdated academic materials",
-                      "Maintain one digital repository for subject resources",
-                      "Track student performance and learning progress",
-                    ].map((item, i) => (
-                      <li key={i} className="flex items-center gap-2.5">
-                        <CheckCircle color="text-green-400" />
-                        <span className="text-white text-sm">{item}</span>
-                      </li>
-                    ))}
-                  </ul>
+                    <p className="text-[11px] font-bold tracking-[0.2em] uppercase mb-4 text-blue-600 relative">
+                      
+                      For Faculty
+                    </p>
+
+                    <h3 className="text-2xl font-black leading-tight mb-2 bg-gradient-to-r from-gray-900 to-gray-800 bg-clip-text text-transparent">
+                      Manage academic content
+                    </h3>
+
+                    <p className="text-sm leading-relaxed mb-6 text-gray-700 font-medium">
+                      Upload, organize, and manage lecture videos, notes, and assessments in one structured platform.
+                    </p>
+
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-7 flex-1">
+                      {[
+                        "Upload lecture videos, notes & assessment files",
+                        "Organize by year, semester, subject & unit",
+                        "Preview PDFs and assessments before publishing",
+                        "Update or delete outdated academic materials",
+                        "One digital repository for subject resources",
+                        "Track student performance and learning progress",
+                      ].map((item, i) => (
+                        <div key={i} className="flex items-start gap-2.5 group/item p-2 rounded-lg hover:bg-blue-50/30 transition-all duration-300">
+                          <svg
+                            className="w-4 h-4 flex-shrink-0 mt-0.5 text-blue-500 group-hover/item:text-blue-600 transition-colors"
+                            fill="none"
+                            viewBox="0 0 24 24"
+                            stroke="currentColor"
+                            strokeWidth={2.5}
+                          >
+                            <circle cx="12" cy="12" r="10" />
+                            <path
+                              strokeLinecap="round"
+                              strokeLinejoin="round"
+                              d="M8 12l3 3 5-5"
+                            />
+                          </svg>
+
+                          <span className="text-xs font-medium leading-snug text-gray-800 group-hover/item:text-gray-900">
+                            {item}
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+
+                    <button
+                      className="
+                        inline-flex items-center gap-2
+                        px-6 py-3
+                        rounded-xl
+                        text-sm font-semibold
+                        mt-auto w-fit
+                        bg-gradient-to-r from-blue-600/25 to-blue-500/15
+                        text-blue-700
+                        border border-blue-400/40
+                        backdrop-blur-md
+                        hover:from-blue-600/35 hover:to-blue-500/25
+                        hover:border-blue-400/60
+                        hover:shadow-lg hover:shadow-blue-400/20
+                        transition-all duration-300
+                        relative group/btn overflow-hidden
+                      "
+                    >
+                      <div className="absolute inset-0 bg-gradient-to-r from-white/20 via-transparent to-transparent opacity-0 group-hover/btn:opacity-100 transition-opacity duration-300" />
+                      Start managing
+
+                      <svg
+                        className="w-4 h-4 transition-transform group-hover/btn:translate-x-1"
+                        fill="none"
+                        viewBox="0 0 24 24"
+                        stroke="currentColor"
+                        strokeWidth={2.5}
+                      >
+                        <path
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                          d="M9 5l7 7-7 7"
+                        />
+                      </svg>
+                    </button>
+
+                  </div>
                 </div>
               </div>
+
             </Reveal>
 
-            {/* Student Portal Card */}
-            <Reveal direction="right" delay={80}>
-              <div className="rounded-3xl overflow-hidden bg-[#111827] shadow-xl shadow-slate-200 border border-slate-100">
-                <div className="relative h-[300px] md:h-[340px] bg-gradient-to-br from-slate-100 to-blue-50 overflow-hidden">
+            {/* ── Student Portal Card ── */}
+            <Reveal direction="right" delay={120} className="h-full">
+              <div className="flex flex-col h-full rounded-3xl overflow-hidden transition-all duration-500 group relative"
+                   style={{ background: "linear-gradient(160deg, rgba(59,130,246,0.08) 0%, rgba(37,99,235,0.04) 100%)" }}>
+                {/* Decorative Blur Blobs */}
+                <div className="absolute -top-20 -left-20 w-40 h-40 bg-blue-400/10 rounded-full blur-3xl group-hover:bg-blue-400/15 transition-all duration-500" />
+                <div className="absolute -bottom-20 -right-20 w-32 h-32 bg-blue-600/5 rounded-full blur-2xl" />
+                
+                {/* Main Border Gradient */}
+                <div className="absolute inset-0 rounded-3xl pointer-events-none" style={{
+                  background: "linear-gradient(135deg, rgba(147,197,253,0.2) 0%, transparent 50%, rgba(37,99,235,0.1) 100%)",
+                }} />
+                
+                <div className="absolute inset-0 rounded-3xl shadow-2xl shadow-blue-400/20 group-hover:shadow-blue-500/30 transition-all duration-500 pointer-events-none" />
+                
+                {/* Inner Border */}
+                <div className="absolute inset-[1px] rounded-3xl border border-gradient-to-br from-blue-300/30 via-blue-200/10 to-blue-300/20 pointer-events-none" />
+
+                {/* IMAGE — fixed height, fully visible */}
+                <div className="relative w-full h-[300px] overflow-hidden flex-shrink-0 z-10">
                   <img
                     src={student}
-                    alt="Osmania University Student Portal"
-                    className="w-full h-full object-cover object-center"
+                    alt="Student Portal"
+                    className="w-full h-full object-cover object-center group-hover:scale-105 transition-transform duration-700"
                   />
-
-                  <div className="absolute inset-x-0 bottom-0 h-24 bg-gradient-to-t from-[#111827] to-transparent" />
-
-                  <div className="absolute top-5 left-5 bg-white/95 backdrop-blur rounded-xl px-3 py-1.5 flex items-center gap-2 shadow-sm">
-                    <svg
-                      className="w-3.5 h-3.5 text-blue-600"
-                      fill="currentColor"
-                      viewBox="0 0 24 24"
-                    >
+                  <div className="absolute inset-0 bg-gradient-to-t from-black/30 via-transparent to-transparent" />
+                  <div className="absolute top-4 left-4 flex items-center gap-2 px-3 py-1.5 rounded-xl shadow-md"
+                       style={{ background: "rgba(37,99,235,0.5)", backdropFilter: "blur(12px)", border: "1px solid rgba(147,197,253,0.4)" }}>
+                    <svg className="w-3.5 h-3.5 text-blue-100" fill="currentColor" viewBox="0 0 24 24">
                       <path d="M12 3L1 9l4 2.18v6L12 21l7-3.82v-6l2-1.09V17h2V9L12 3zm6.82 6L12 12.72 5.18 9 12 5.28 18.82 9zM17 15.99l-5 2.73-5-2.73v-3.72L12 15l5-2.73v3.72z" />
                     </svg>
-                    <span className="text-xs font-bold text-gray-700 tracking-wider uppercase">
-                      Student Portal
-                    </span>
+                    <span className="text-[11px] font-bold text-blue-50 tracking-wider uppercase">Student Portal</span>
                   </div>
-
-                  <div className="absolute top-5 right-5 bg-white/95 backdrop-blur rounded-xl px-3 py-1.5 flex items-center gap-1.5 shadow-sm">
-                    <span className="w-2 h-2 bg-green-500 rounded-full animate-pulse" />
-                    <span className="text-xs font-bold text-gray-700">
-                      24/7 access
-                    </span>
+                  <div className="absolute top-4 right-4 flex items-center gap-2 px-3 py-1.5 rounded-xl shadow-md"
+                       style={{ background: "rgba(37,99,235,0.5)", backdropFilter: "blur(12px)", border: "1px solid rgba(147,197,253,0.4)" }}>
+                    <span className="w-2 h-2 bg-emerald-400 rounded-full animate-pulse" />
+                    <span className="text-[11px] font-bold text-blue-50">24/7 Access</span>
                   </div>
                 </div>
 
-                <div className="p-8 pt-7">
-                  <h3 className="text-3xl font-black text-white mb-3">
-                    Learn at your own pace
-                  </h3>
+                {/* TRANSPARENT BLUE GLASS CARD — below image, grows to fill */}
+                <div className="flex-1 p-6 bg-blue-100/30 z-20 relative">
+                 <div
+  className="h-full rounded-2xl p-7 flex flex-col"
+  style={{
+    background: "rgba(255,255,255,0.03)",
+    border: "1px solid #2563eb",
+    boxShadow: `
+      0 0 0 2px rgba(37,99,235,0.25),
+      0 15px 35px rgba(37,99,235,0.15)
+    `,
+  }}
+>
 
-                  <p className="text-slate-300 text-sm leading-relaxed mb-5">
-                    The student portal helps learners access lecture videos,
-                    notes, and assessments anytime in a simple unit-wise format.
-                  </p>
+                    <div className="absolute -top-3 right-8 w-24 h-1 bg-gradient-to-r from-blue-400/0 via-blue-400/40 to-blue-400/0 rounded-full blur" />
 
-                  <ul className="space-y-2.5">
-                    {[
-                      "Access subject-wise lecture videos and notes",
-                      "Download PDFs for revision and exam preparation",
-                      "Open assessments and practice materials in one place",
-                      "Follow unit-wise learning flow without confusion",
-                      "Revise missed classes anytime through digital resources",
-                      "students can able to take the assessments and view their performance.",
-                    ].map((item, i) => (
-                      <li key={i} className="flex items-center gap-2.5">
-                        <CheckCircle color="text-green-400" />
-                        <span className="text-white text-sm">{item}</span>
-                      </li>
-                    ))}
-                  </ul>
+                    <p className="text-[11px] font-bold tracking-[0.2em] uppercase mb-4 text-blue-600 relative">
+                   
+                      For Students
+                    </p>
+
+                    <h3 className="text-2xl font-black leading-tight mb-2 bg-gradient-to-r from-gray-900 to-gray-800 bg-clip-text text-transparent">
+                      Learn at your own pace
+                    </h3>
+
+                    <p className="text-sm leading-relaxed mb-6 text-gray-700 font-medium">
+                      Access all lecture videos, notes, and assessments anytime. Download resources and track your progress effortlessly.
+                    </p>
+
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-7 flex-1">
+                      {[
+                        "Access subject-wise lecture videos and notes",
+                        "Download PDFs for revision and exam prep",
+                        "Open assessments and practice materials",
+                        "Follow unit-wise learning flow easily",
+                        "Revise missed classes through digital resources",
+                        "Take assessments and view your performance",
+                      ].map((item, i) => (
+                        <div key={i} className="flex items-start gap-2.5 group/item p-2 rounded-lg hover:bg-blue-50/30 transition-all duration-300">
+                          <svg
+                            className="w-4 h-4 flex-shrink-0 mt-0.5 text-blue-500 group-hover/item:text-blue-600 transition-colors"
+                            fill="none"
+                            viewBox="0 0 24 24"
+                            stroke="currentColor"
+                            strokeWidth={2.5}
+                          >
+                            <circle cx="12" cy="12" r="10" />
+                            <path
+                              strokeLinecap="round"
+                              strokeLinejoin="round"
+                              d="M8 12l3 3 5-5"
+                            />
+                          </svg>
+
+                          <span className="text-xs font-medium leading-snug text-gray-800 group-hover/item:text-gray-900">
+                            {item}
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+
+                    <button
+                      className="
+                        inline-flex items-center gap-2
+                        px-6 py-3
+                        rounded-xl
+                        text-sm font-semibold
+                        mt-auto w-fit
+                        bg-gradient-to-r from-blue-600/25 to-blue-500/15
+                        text-blue-700
+                        border border-blue-400/40
+                        backdrop-blur-md
+                        hover:from-blue-600/35 hover:to-blue-500/25
+                        hover:border-blue-400/60
+                        hover:shadow-lg hover:shadow-blue-400/20
+                        transition-all duration-300
+                        relative group/btn overflow-hidden
+                      "
+                    >
+                      <div className="absolute inset-0 bg-gradient-to-r from-white/20 via-transparent to-transparent opacity-0 group-hover/btn:opacity-100 transition-opacity duration-300" />
+                      Start learning
+
+                      <svg
+                        className="w-4 h-4 transition-transform group-hover/btn:translate-x-1"
+                        fill="none"
+                        viewBox="0 0 24 24"
+                        stroke="currentColor"
+                        strokeWidth={2.5}
+                      >
+                        <path
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                          d="M9 5l7 7-7 7"
+                        />
+                      </svg>
+                    </button>
+
+                  </div>
                 </div>
               </div>
             </Reveal>
+
           </div>
         </div>
       </section>
 
-      {/* ══════════ FAQ ══════════ */}
-      <section id="faq" className="bg-gray-50 py-20 md:py-24 px-6 md:px-8">
-        <div className="max-w-3xl mx-auto">
-          <Reveal direction="up" className="text-center mb-12">
-            <h2 className="text-3xl md:text-4xl font-black text-gray-900 mb-4">
-              Frequently asked questions
-            </h2>
+      {/* ══════════ FAQ SECTION ══════════ */}
+               {/* ══════════ FAQ SECTION ══════════ */}
+<section id="faq" className="bg-white py-20 md:py-24 px-6 md:px-8">
+  <div className="max-w-3xl mx-auto">
+    <Reveal direction="up" className="text-center mb-12">
+      <h2 className="text-3xl md:text-4xl font-black text-gray-900 mb-4">
+        Frequently asked{" "}
+        <span className="bg-gradient-to-r from-blue-600 to-blue-700 bg-clip-text text-transparent">
+          questions
+        </span>
+      </h2>
 
-            <p className="text-gray-500 text-base">
-              Everything you need to know about the Osmania University LMS
-              platform.
-            </p>
-          </Reveal>
+      <p className="text-gray-600 text-base">
+        Everything you need to know about the Osmania University LMS platform.
+      </p>
+    </Reveal>
 
-          <Reveal direction="up" delay={100}>
-            <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden divide-y divide-gray-100">
-              {faqs.map((faq, i) => (
-                <div key={i}>
-                  <button
-                    onClick={() => toggleFaq(i)}
-                    className="w-full flex items-center justify-between px-6 md:px-7 py-5 text-left hover:bg-gray-50 transition-colors"
-                  >
-                    <span className="text-base font-semibold text-gray-800 pr-4">
-                      {faq.question}
-                    </span>
+    <Reveal direction="up" delay={100}>
+      <div className="bg-white rounded-2xl shadow-xl shadow-gray-200 border border-gray-100 overflow-hidden divide-y divide-gray-100">
+        {faqs.map((faq, i) => (
+          <div
+            key={i}
+            className="hover:bg-gray-50/50 transition-colors duration-300"
+          >
+            <button
+              onClick={() => toggleFaq(i)}
+              className="w-full flex items-center justify-between px-6 md:px-8 py-6 text-left hover:bg-blue-50/30 transition-all duration-300"
+            >
+              <span className="text-base font-semibold text-gray-900 pr-4">
+                {faq.question}
+              </span>
 
-                    <ChevronDown open={faqOpen === i} />
-                  </button>
+              <ChevronDown open={faqOpen === i} />
+            </button>
 
-                  {faqOpen === i && (
-                    <div className="px-6 md:px-7 pb-6 bg-white">
-                      <p className="text-gray-500 text-sm leading-relaxed">
-                        {faq.answer}
-                      </p>
-                    </div>
-                  )}
-                </div>
-              ))}
-            </div>
-          </Reveal>
+            {faqOpen === i && (
+              <div className="px-6 md:px-8 pb-6 bg-gradient-to-b from-blue-50/30 to-transparent">
+                <p className="text-gray-600 text-sm leading-relaxed">
+                  {faq.answer}
+                </p>
+              </div>
+            )}
+          </div>
+        ))}
+      </div>
+    </Reveal>
+  </div>
+</section>
+      
+
+      {/* ══════════ FOOTER ══════════ */}
+      <footer className="bg-gradient-to-b from-gray-50 to-white border-t border-gray-100 py-12 px-6 md:px-8">
+        <div className="max-w-screen-xl mx-auto text-center">
+          <p className="text-gray-600 text-sm mb-2">
+            © 2024 Osmania University Learning Management System
+          </p>
+          <p className="text-gray-400 text-xs">
+            Dedicated to advancing digital learning and academic excellence
+          </p>
         </div>
-      </section>
+      </footer>
     </div>
   );
 };
