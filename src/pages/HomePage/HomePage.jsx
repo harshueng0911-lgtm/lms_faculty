@@ -7,6 +7,10 @@ import oueng from "../../assets/images/ou-campus.png";
 import oulogo from "../../assets/images/Eng_college_log.png";
 import student from "../../assets/images/students.png";
 import facul from "../../assets/images/faculty.png";
+import ece from "../../assets/images/ece.jpg";
+import cse from "../../assets/images/cse.jpg";
+import mech from "../../assets/images/mech.jpg";
+import biomed from "../../assets/images/biomedical.png";
 
 /* ─── Scroll-Reveal Hook ─── */
 function useReveal(threshold = 0.12) {
@@ -120,6 +124,10 @@ function ChevronDown({ open }) {
 /* ─── Main HomePage Component ─── */
 const HomePage = () => {
   const [faqOpen, setFaqOpen] = useState(null);
+
+  // ADD THIS
+  const [activeNav, setActiveNav] = useState("home");
+
   const navigate = useNavigate();
 
   const toggleFaq = (i) => setFaqOpen(faqOpen === i ? null : i);
@@ -169,32 +177,32 @@ const HomePage = () => {
 
   const courseCards = [
     {
-      src: oueng,
+      src: mech,
       title: "Hardware Acceleration for Machine Learning",
       meta: "Engineering curriculum · Lecture resources",
     },
     {
-      src: oulogo,
+      src: cse,
+      title: "Computer Science & Engineering",
+      meta: "Engineering curriculum · Lecture resources",
+    },
+    {
+      src: ece,
       title: "Geographic Information System",
       meta: "Subject-wise digital learning material",
     },
     {
-      src: viceChancellorImg,
+      src: biomed,
       title: "Academic Leadership & Digital Vision",
       meta: "Osmania University academic ecosystem",
-    },
-    {
-      src: principalImg,
-      title: "Engineering Education Support",
-      meta: "Faculty-guided learning resources",
     },
   ];
 
   return (
     <div className="bg-white text-gray-900 overflow-x-hidden">
       {/* ══════════ FIXED NAVBAR ══════════ */}
-      <nav className="fixed top-0 left-0 right-0 z-[9999] bg-white border-b border-gray-100 backdrop-blur-xl bg-white/95">
-        <div className="max-w-screen-xl mx-auto px-6 md:px-8 h-[80px] flex items-center justify-between">
+      <nav className="fixed top-0 left-0 right-0 z-[9999] bg-white/95 border-b border-slate-200 backdrop-blur-md">
+        <div className="max-w-[1400px] mx-auto px-8 h-[78px] flex items-center justify-between">
           <div className="flex items-center gap-3">
             <img
               src={oulogo}
@@ -211,33 +219,55 @@ const HomePage = () => {
               </span>
             </div>
           </div>
+<div className="hidden md:flex items-center gap-2 bg-slate-50 p-1 rounded-full border border-slate-200">
+  <button
+    onClick={() => {
+      setActiveNav("home");
+      window.scrollTo({
+        top: 0,
+        behavior: "smooth",
+      });
+    }}
+    className={`px-5 py-2 rounded-full text-sm font-medium transition-all duration-200 ${
+      activeNav === "home"
+        ? "bg-white text-blue-600 shadow-sm border border-blue-100"
+        : "text-slate-600 hover:text-slate-900 hover:bg-white"
+    }`}
+  >
+    Home
+  </button>
 
-          <div className="hidden md:flex items-center gap-10">
-            <button
-              onClick={() => window.scrollTo({ top: 0, behavior: "smooth" })}
-              className="text-gray-700 font-medium hover:text-blue-600 transition-colors duration-300"
-            >
-              Home
-            </button>
+  <button
+    onClick={() => {
+      setActiveNav("faq");
 
-            <a
-              href="#faq"
-              className="text-gray-700 font-medium hover:text-blue-600 transition-colors duration-300"
-            >
-              FAQ's
-            </a>
+      document
+        .getElementById("faq")
+        ?.scrollIntoView({ behavior: "smooth" });
+    }}
+    className={`px-5 py-2 rounded-full text-sm font-medium transition-all duration-200 ${
+      activeNav === "faq"
+        ? "bg-white text-blue-600 shadow-sm border border-blue-100"
+        : "text-slate-600 hover:text-slate-900 hover:bg-white"
+    }`}
+  >
+    FAQ's
+  </button>
 
-            <button
-              onClick={() => {
-                window.scrollTo(0, 0);
-                navigate("/about");
-              }}
-              className="text-gray-700 font-medium hover:text-blue-600 transition-colors duration-300"
-            >
-              About us
-            </button>
-          </div>
-
+  <button
+    onClick={() => {
+      setActiveNav("about");
+      navigate("/about");
+    }}
+    className={`px-5 py-2 rounded-full text-sm font-medium transition-all duration-200 ${
+      activeNav === "about"
+        ? "bg-white text-blue-600 shadow-sm border border-blue-100"
+        : "text-slate-600 hover:text-slate-900 hover:bg-white"
+    }`}
+  >
+    About us
+  </button>
+</div>
           <div className="flex items-center gap-3 md:gap-4">
             <button
               onClick={() => navigate("/faculty/login")}
@@ -912,7 +942,6 @@ const HomePage = () => {
         </div>
       </section>
 
-      {/* ══════════ FAQ SECTION ══════════ */}
                {/* ══════════ FAQ SECTION ══════════ */}
 <section id="faq" className="bg-white py-20 md:py-24 px-6 md:px-8">
   <div className="max-w-3xl mx-auto">
