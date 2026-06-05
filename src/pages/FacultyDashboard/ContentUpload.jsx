@@ -226,6 +226,8 @@ async function checkForDuplicate(table, facultyId, subject, title, year, semeste
 // UNIFIED UPLOAD FORM
 // ─────────────────────────────────────────────────────────────────────────────
 const MAX_VIDEO_BYTES = 6 * 1024 * 1024 * 1024; // 6 GB
+const MAX_PDF_BYTES = 200 * 1024 * 1024; // 200 MB
+const MAX_ASSESSMENT_BYTES = 50 * 1024 * 1024; // 50 MB
 const BASE_URL = () => (import.meta.env.VITE_API_URL || "http://localhost:5000").replace(/\/$/, "");
 
 function UnifiedUploadForm({ faculty, prefill }) {
@@ -316,6 +318,22 @@ function UnifiedUploadForm({ faculty, prefill }) {
     setPdfFile(selected);
     setPdfSuccess(false);
     setError("");
+
+    if (!selected) return;
+
+    if (!selected.name.toLowerCase().endsWith(".pdf")) {
+      setError("Only PDF files are accepted.");
+      setPdfFile(null);
+      e.target.value = "";
+      return;
+    }
+    if (selected.size > MAX_PDF_BYTES) {
+      setError(
+        `PDF file too large (${(selected.size / 1_048_576).toFixed(1)} MB). Maximum is 200 MB.`
+      );
+      setPdfFile(null);
+      e.target.value = "";
+    }
   }
 
   function handleAssessmentFileChange(e) {
@@ -323,6 +341,25 @@ function UnifiedUploadForm({ faculty, prefill }) {
     setAssessmentFile(selected);
     setAssessmentSuccess(false);
     setError("");
+
+    if (!selected) return;
+
+    const validExtensions = [".xlsx", ".csv", ".docx", ".txt"];
+    const isValidExt = validExtensions.some((ext) => selected.name.toLowerCase().endsWith(ext));
+
+    if (!isValidExt) {
+      setError("Only .xlsx, .csv, .docx, and .txt files are accepted for assessments.");
+      setAssessmentFile(null);
+      e.target.value = "";
+      return;
+    }
+    if (selected.size > MAX_ASSESSMENT_BYTES) {
+      setError(
+        `Assessment file too large (${(selected.size / 1_048_576).toFixed(1)} MB). Maximum is 50 MB.`
+      );
+      setAssessmentFile(null);
+      e.target.value = "";
+    }
   }
 
   function handleVideoCancel() {
@@ -331,6 +368,26 @@ function UnifiedUploadForm({ faculty, prefill }) {
     setVideoLoading(false);
     setUploadPhase("");
     setError("Video upload cancelled.");
+    startTimeRef.current = null;
+    lastLoadedRef.current = 0;
+  }
+
+  function handlePdfCancel() {
+    abortCtrlRef.current?.abort();
+    clearInterval(speedTimerRef.current);
+    setPdfLoading(false);
+    setUploadPhase("");
+    setError("PDF upload cancelled.");
+    startTimeRef.current = null;
+    lastLoadedRef.current = 0;
+  }
+
+  function handleAssessmentCancel() {
+    abortCtrlRef.current?.abort();
+    clearInterval(speedTimerRef.current);
+    setAssessmentLoading(false);
+    setUploadPhase("");
+    setError("Assessment upload cancelled.");
     startTimeRef.current = null;
     lastLoadedRef.current = 0;
   }
@@ -361,7 +418,7 @@ function UnifiedUploadForm({ faculty, prefill }) {
   }
 
   // ═══════════════════════════════════════════════════════════════
-  // VIDEO UPLOAD — NEW DIRECT BUNNY ARCHITECTURE
+  // VIDEO UPLOAD — DIRECT BUNNY ARCHITECTURE
   // ═══════════════════════════════════════════════════════════════
   async function handleVideoUpload() {
     setError("");
@@ -521,40 +578,24 @@ function UnifiedUploadForm({ faculty, prefill }) {
   }
 
   // ═══════════════════════════════════════════════════════════════
-  // PDF UPLOAD (UNCHANGED)
+  // PDF UPLOAD — NEW DIRECT BUNNY ARCHITECTURE
   // ═══════════════════════════════════════════════════════════════
   async function handlePdfUpload() {
     setError("");
     setPdfSuccess(false);
+    setCdnUrl("");
 
-    const currentFaculty =
-      faculty || JSON.parse(localStorage.getItem("faculty") || "null");
-
-    if (!currentFaculty?.id) {
-      setError("Please login again");
-      return;
-    }
+    const currentFaculty = faculty || JSON.parse(localStorage.getItem("faculty") || "null");
+    if (!currentFaculty?.id) { setError("Please login again"); return; }
 
     const validationError = validateCommonFields();
-    if (validationError) {
-      setError(validationError);
-      return;
-    }
+    if (validationError) { setError(validationError); return; }
 
-    if (!pdfFile) {
-      setError("Please select a PDF file");
-      return;
-    }
+    if (!pdfFile) { setError("Please select a PDF file"); return; }
 
     const existing = await checkForDuplicate(
-      "pdfs",
-      currentFaculty.id,
-      form.subject,
-      form.title,
-      form.year,
-      form.semester
+      "pdfs", currentFaculty.id, form.subject, form.title, form.year, form.semester
     );
-
     if (existing.length > 0) {
       const proceed = await askUserAboutDuplicate(existing, "PDF");
       if (!proceed) return;
@@ -562,43 +603,119 @@ function UnifiedUploadForm({ faculty, prefill }) {
 
     try {
       setPdfLoading(true);
+      setTotalBytes(pdfFile.size);
+      setLoadedBytes(0);
+      setSpeedMBs("0.0");
+      setEtaSeconds(null);
 
-      const formData = new FormData();
-      formData.append("file", pdfFile);
-      formData.append("type", "pdf");
-      formData.append("faculty_id", currentFaculty.id);
-      formData.append("faculty_name", currentFaculty.name || "");
-      formData.append("department", currentFaculty.department || "");
-      formData.append("subject", form.subject);
-      formData.append("unit", form.unit);
-      formData.append("title", form.title);
-      formData.append("year", form.year);
-      formData.append("semester", form.year === "1" ? "" : form.semester);
+      // ─────────────────────────────────────────────────────────────
+      // STEP 1: Get upload configuration from backend
+      // ─────────────────────────────────────────────────────────────
+      setUploadPhase("preparing");
 
-      const res = await fetch(`${BASE_URL()}/upload-content`, {
+      const configRes = await fetch(`${BASE_URL()}/create-pdf-upload`, {
         method: "POST",
-        body: formData,
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          fileName: pdfFile.name,
+          fileSize: pdfFile.size,
+        }),
       });
 
-      const contentType = res.headers.get("content-type") || "";
-
-      let data = {};
-
-      if (contentType.includes("application/json")) {
-        data = await res.json();
-      } else {
-        throw new Error(
-          `Backend route not found or invalid response (${res.status}). Check backend server on ${BASE_URL()}`
-        );
+      if (!configRes.ok) {
+        const errData = await configRes.json().catch(() => ({}));
+        throw new Error(errData.error || `Config request failed: ${configRes.status}`);
       }
 
-      if (!res.ok) {
-        throw new Error(data.error || "Upload failed");
+      const { uploadUrl, accessKey, cdnUrl: pdfCdnUrl, filePath } = await configRes.json();
+
+      console.log("[PdfUpload] Upload config received:", { uploadUrl, cdnUrl: pdfCdnUrl, filePath });
+
+      // ─────────────────────────────────────────────────────────────
+      // STEP 2: Upload directly to Bunny Storage
+      // ─────────────────────────────────────────────────────────────
+      setUploadPhase("uploading");
+      startSpeedTracker(() => pdfFile.size);
+
+      abortCtrlRef.current = new AbortController();
+
+      const xhr = new XMLHttpRequest();
+
+      // Track upload progress
+      xhr.upload.addEventListener("progress", (e) => {
+        if (e.lengthComputable) {
+          setLoadedBytes(e.loaded);
+          lastLoadedRef.current = e.loaded;
+        }
+      });
+
+      // Handle completion
+      const uploadPromise = new Promise((resolve, reject) => {
+        xhr.addEventListener("load", () => {
+          if (xhr.status === 200 || xhr.status === 201) {
+            console.log("[PdfUpload] ✅ Direct upload to Bunny complete");
+            resolve();
+          } else {
+            reject(new Error(`Bunny upload failed: HTTP ${xhr.status}`));
+          }
+        });
+
+        xhr.addEventListener("error", () => {
+          reject(new Error("Network error during Bunny upload"));
+        });
+
+        xhr.addEventListener("abort", () => {
+          reject(new Error("Upload cancelled"));
+        });
+      });
+
+      // Connect abort controller
+      abortCtrlRef.current.signal.addEventListener("abort", () => {
+        xhr.abort();
+      });
+
+      // Send PUT request to Bunny
+      xhr.open("PUT", uploadUrl);
+      xhr.setRequestHeader("AccessKey", accessKey);
+      xhr.setRequestHeader("Content-Type", "application/pdf");
+      xhr.send(pdfFile);
+
+      await uploadPromise;
+
+      clearInterval(speedTimerRef.current);
+
+      // ─────────────────────────────────────────────────────────────
+      // STEP 3: Save metadata to Supabase
+      // ─────────────────────────────────────────────────────────────
+      setUploadPhase("saving");
+
+      const metadataRes = await fetch(`${BASE_URL()}/save-pdf-metadata`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          filePath,
+          cdnUrl: pdfCdnUrl,
+          faculty_id: currentFaculty.id,
+          faculty_name: currentFaculty.name || "",
+          department: currentFaculty.department || "",
+          year: form.year,
+          semester: form.year === "1" ? "" : form.semester,
+          subject: form.subject,
+          unit: form.unit,
+          title: form.title,
+        }),
+      });
+
+      if (!metadataRes.ok) {
+        const errData = await metadataRes.json().catch(() => ({}));
+        throw new Error(errData.error || "Metadata save failed");
       }
 
+      console.log("[PdfUpload] ✅ Metadata saved to Supabase");
+
+      setUploadPhase("done");
       setPdfSuccess(true);
       setPdfFile(null);
-
       const fi = document.getElementById("pdf-file-input");
       if (fi) fi.value = "";
 
@@ -608,24 +725,34 @@ function UnifiedUploadForm({ faculty, prefill }) {
       }, 2500);
 
     } catch (err) {
-      console.error("PDF upload error:", err);
-      setError(err.message || "PDF upload failed");
+      if (err.message === "Upload cancelled") {
+        setError("PDF upload cancelled.");
+      } else {
+        console.error("[PdfUpload] error:", err);
+        setError(err.message || "PDF upload failed. Please try again.");
+      }
     } finally {
+      clearInterval(speedTimerRef.current);
       setPdfLoading(false);
+      setUploadPhase("");
+      abortCtrlRef.current = null;
+      startTimeRef.current = null;
+      lastLoadedRef.current = 0;
     }
   }
 
   // ═══════════════════════════════════════════════════════════════
-  // ASSESSMENT UPLOAD (UNCHANGED)
+  // ASSESSMENT UPLOAD — NEW DIRECT BUNNY ARCHITECTURE
   // ═══════════════════════════════════════════════════════════════
   async function handleAssessmentUpload() {
     setError("");
     setAssessmentSuccess(false);
+    setCdnUrl("");
 
     const currentFaculty = faculty || JSON.parse(localStorage.getItem("faculty") || "null");
     if (!currentFaculty?.id) { setError("Please login again"); return; }
 
-    if (!assessmentFile) { setError("Please upload the assessment file"); return; }
+    if (!assessmentFile) { setError("Please select an assessment file"); return; }
 
     if (form.subject && form.title && form.year && form.unit) {
       const existing = await checkForDuplicate(
@@ -639,21 +766,125 @@ function UnifiedUploadForm({ faculty, prefill }) {
 
     try {
       setAssessmentLoading(true);
-      const formData = new FormData();
-      formData.append("file", assessmentFile);
-      formData.append("faculty_id", currentFaculty.id);
-      formData.append("faculty_name", currentFaculty.name || "");
-      formData.append("department", currentFaculty.department);
-      formData.append("subject", form.subject || "");
-      formData.append("unit", form.unit || "");
-      formData.append("title", form.title || "");
-      formData.append("year", form.year || "");
-      formData.append("semester", form.year === "1" ? "" : (form.semester || ""));
+      setTotalBytes(assessmentFile.size);
+      setLoadedBytes(0);
+      setSpeedMBs("0.0");
+      setEtaSeconds(null);
 
-      const res = await fetch(`${BASE_URL()}/upload-assessment`, { method: "POST", body: formData });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || "Upload failed");
+      // ─────────────────────────────────────────────────────────────
+      // STEP 1: Get upload configuration from backend
+      // ─────────────────────────────────────────────────────────────
+      setUploadPhase("preparing");
 
+      const configRes = await fetch(`${BASE_URL()}/create-assessment-upload`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          fileName: assessmentFile.name,
+          fileSize: assessmentFile.size,
+        }),
+      });
+
+      if (!configRes.ok) {
+        const errData = await configRes.json().catch(() => ({}));
+        throw new Error(errData.error || `Config request failed: ${configRes.status}`);
+      }
+
+      const { uploadUrl, accessKey, cdnUrl: assessmentCdnUrl, filePath } = await configRes.json();
+
+      console.log("[AssessmentUpload] Upload config received:", { uploadUrl, cdnUrl: assessmentCdnUrl, filePath });
+
+      // ─────────────────────────────────────────────────────────────
+      // STEP 2: Upload directly to Bunny Storage
+      // ─────────────────────────────────────────────────────────────
+      setUploadPhase("uploading");
+      startSpeedTracker(() => assessmentFile.size);
+
+      abortCtrlRef.current = new AbortController();
+
+      const xhr = new XMLHttpRequest();
+
+      // Track upload progress
+      xhr.upload.addEventListener("progress", (e) => {
+        if (e.lengthComputable) {
+          setLoadedBytes(e.loaded);
+          lastLoadedRef.current = e.loaded;
+        }
+      });
+
+      // Handle completion
+      const uploadPromise = new Promise((resolve, reject) => {
+        xhr.addEventListener("load", () => {
+          if (xhr.status === 200 || xhr.status === 201) {
+            console.log("[AssessmentUpload] ✅ Direct upload to Bunny complete");
+            resolve();
+          } else {
+            reject(new Error(`Bunny upload failed: HTTP ${xhr.status}`));
+          }
+        });
+
+        xhr.addEventListener("error", () => {
+          reject(new Error("Network error during Bunny upload"));
+        });
+
+        xhr.addEventListener("abort", () => {
+          reject(new Error("Upload cancelled"));
+        });
+      });
+
+      // Connect abort controller
+      abortCtrlRef.current.signal.addEventListener("abort", () => {
+        xhr.abort();
+      });
+
+      // Determine MIME type
+      let mimeType = "application/octet-stream";
+      const fileName = assessmentFile.name.toLowerCase();
+      if (fileName.endsWith(".xlsx")) mimeType = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
+      else if (fileName.endsWith(".csv")) mimeType = "text/csv";
+      else if (fileName.endsWith(".docx")) mimeType = "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
+      else if (fileName.endsWith(".txt")) mimeType = "text/plain";
+
+      // Send PUT request to Bunny
+      xhr.open("PUT", uploadUrl);
+      xhr.setRequestHeader("AccessKey", accessKey);
+      xhr.setRequestHeader("Content-Type", mimeType);
+      xhr.send(assessmentFile);
+
+      await uploadPromise;
+
+      clearInterval(speedTimerRef.current);
+
+      // ─────────────────────────────────────────────────────────────
+      // STEP 3: Save metadata to Supabase
+      // ─────────────────────────────────────────────────────────────
+      setUploadPhase("saving");
+
+      const metadataRes = await fetch(`${BASE_URL()}/save-assessment-metadata`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          filePath,
+          cdnUrl: assessmentCdnUrl,
+          faculty_id: currentFaculty.id,
+          faculty_name: currentFaculty.name || "",
+          department: currentFaculty.department || "",
+          year: form.year,
+          semester: form.year === "1" ? "" : form.semester,
+          subject: form.subject,
+          unit: form.unit,
+          title: form.title,
+        }),
+      });
+
+      if (!metadataRes.ok) {
+        const errData = await metadataRes.json().catch(() => ({}));
+        throw new Error(errData.error || "Metadata save failed");
+      }
+
+      console.log("[AssessmentUpload] ✅ Metadata saved to Supabase");
+
+      setUploadPhase("done");
       setAssessmentSuccess(true);
       setAssessmentFile(null);
       const fi = document.getElementById("assessment-file-input");
@@ -665,9 +896,19 @@ function UnifiedUploadForm({ faculty, prefill }) {
       }, 2500);
 
     } catch (err) {
-      setError(err.message || "Assessment upload failed");
+      if (err.message === "Upload cancelled") {
+        setError("Assessment upload cancelled.");
+      } else {
+        console.error("[AssessmentUpload] error:", err);
+        setError(err.message || "Assessment upload failed. Please try again.");
+      }
     } finally {
+      clearInterval(speedTimerRef.current);
       setAssessmentLoading(false);
+      setUploadPhase("");
+      abortCtrlRef.current = null;
+      startTimeRef.current = null;
+      lastLoadedRef.current = 0;
     }
   }
 
@@ -695,7 +936,7 @@ function UnifiedUploadForm({ faculty, prefill }) {
 
   const phaseLabel = {
     preparing: "🔧 Preparing upload...",
-    uploading: `📤 Uploading— ${progressPct}%`,
+    uploading: `📤 Uploading — ${progressPct}%`,
     saving: "💾 Saving metadata...",
     done: "✅ Done!",
   };
@@ -920,7 +1161,7 @@ function UnifiedUploadForm({ faculty, prefill }) {
           )}
         </div>
 
-        {/* PDF + Assessment Sections (UNCHANGED) */}
+        {/* PDF + Assessment Sections */}
         <div className="flex flex-col gap-4">
 
           {/* PDF Section */}
@@ -973,12 +1214,54 @@ function UnifiedUploadForm({ faculty, prefill }) {
                         file:text-sm file:font-medium file:bg-orange-100 file:text-orange-700
                         hover:file:bg-orange-200 cursor-pointer"
                     />
+                    <p className="text-xs text-gray-400 mt-2">
+                      PDF only · max 200 MB
+                    </p>
                     {pdfFile && (
                       <p className="text-xs text-gray-600 mt-1.5 font-medium">
                         📄 {pdfFile.name} — {(pdfFile.size / 1024 / 1024).toFixed(1)} MB
                       </p>
                     )}
                   </div>
+
+                  {pdfLoading && (
+                    <div className="rounded-xl border border-orange-200 bg-white p-3 space-y-2">
+                      <p className="text-sm font-semibold text-orange-800">
+                        {phaseLabel[uploadPhase] || "⚙️ Working…"}
+                      </p>
+
+                      {uploadPhase === "uploading" ? (
+                        <>
+                          <div className="w-full bg-orange-200 rounded-full h-3 overflow-hidden">
+                            <div
+                              className="bg-orange-600 h-3 rounded-full transition-all duration-300"
+                              style={{ width: `${progressPct}%` }}
+                            />
+                          </div>
+                          <div className="flex items-center justify-between text-xs text-orange-700">
+                            <span>{loadedMB} MB / {totalMB} MB</span>
+                            <span>{speedMBs} MB/s</span>
+                            <span>{formatEta(etaSeconds)}</span>
+                          </div>
+                        </>
+                      ) : (
+                        <div className="w-full bg-orange-200 rounded-full h-2 overflow-hidden">
+                          <div className="bg-orange-500 h-2 rounded-full animate-pulse w-1/3" />
+                        </div>
+                      )}
+
+                      <div className="flex items-center justify-between">
+                        <p className="text-xs text-orange-600">⚠️ Keep this tab open during upload.</p>
+                        <button
+                          type="button"
+                          onClick={handlePdfCancel}
+                          className="text-xs text-red-500 underline ml-4 hover:text-red-700"
+                        >
+                          Cancel
+                        </button>
+                      </div>
+                    </div>
+                  )}
 
                   <button
                     onClick={handlePdfUpload}
@@ -1071,12 +1354,54 @@ function UnifiedUploadForm({ faculty, prefill }) {
                         file:text-sm file:font-medium file:bg-purple-100 file:text-purple-700
                         hover:file:bg-purple-200 cursor-pointer"
                     />
+                    <p className="text-xs text-gray-400 mt-2">
+                      .xlsx, .csv, .docx, .txt · max 50 MB
+                    </p>
                     {assessmentFile && (
                       <p className="text-xs text-green-600 mt-1.5 font-medium">
                         ✓ Selected: <span className="font-semibold">{assessmentFile.name}</span>
                       </p>
                     )}
                   </div>
+
+                  {assessmentLoading && (
+                    <div className="rounded-xl border border-purple-200 bg-white p-3 space-y-2">
+                      <p className="text-sm font-semibold text-purple-800">
+                        {phaseLabel[uploadPhase] || "⚙️ Working…"}
+                      </p>
+
+                      {uploadPhase === "uploading" ? (
+                        <>
+                          <div className="w-full bg-purple-200 rounded-full h-3 overflow-hidden">
+                            <div
+                              className="bg-purple-600 h-3 rounded-full transition-all duration-300"
+                              style={{ width: `${progressPct}%` }}
+                            />
+                          </div>
+                          <div className="flex items-center justify-between text-xs text-purple-700">
+                            <span>{loadedMB} MB / {totalMB} MB</span>
+                            <span>{speedMBs} MB/s</span>
+                            <span>{formatEta(etaSeconds)}</span>
+                          </div>
+                        </>
+                      ) : (
+                        <div className="w-full bg-purple-200 rounded-full h-2 overflow-hidden">
+                          <div className="bg-purple-500 h-2 rounded-full animate-pulse w-1/3" />
+                        </div>
+                      )}
+
+                      <div className="flex items-center justify-between">
+                        <p className="text-xs text-purple-600">⚠️ Keep this tab open during upload.</p>
+                        <button
+                          type="button"
+                          onClick={handleAssessmentCancel}
+                          className="text-xs text-red-500 underline ml-4 hover:text-red-700"
+                        >
+                          Cancel
+                        </button>
+                      </div>
+                    </div>
+                  )}
 
                   <button
                     onClick={handleAssessmentUpload}

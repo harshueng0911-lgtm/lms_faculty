@@ -18,6 +18,7 @@ import {
 } from "lucide-react";
 
 import { supabase } from "../../lib/supabaseClient";
+import AssessmentPreviewContent from "./AssessmentPreview"; // ← new import
 
 const UNIT_PALETTE = [
   { badgeBg: "bg-[#EAF1FB]", badgeText: "text-[#12376B]", border: "border-[#D9E2F1]" },
@@ -87,16 +88,12 @@ export default function SubjectDetails() {
 
   const getEmbedUrl = (item, type) => {
     if (type === "video") return getVideoEmbedUrl(item);
-    if (item.embed_url)   return item.embed_url;
-    if (item.file_id) {
-      const base = `https://drive.google.com/file/d/${item.file_id}/preview`;
-      return type === "pdf" ? `${base}?embedded=true` : base;
-    }
+    if (item.file_url) return item.file_url;
     return null;
   };
 
-  const getFileUrl     = (item) => item.file_url || (item.file_id ? `https://drive.google.com/file/d/${item.file_id}/view` : null);
-  const getDownloadUrl = (item) => item.file_id ? `https://drive.google.com/uc?export=download&id=${item.file_id}` : (item.file_url || null);
+  const getFileUrl     = (item) => item.file_url || null;
+  const getDownloadUrl = (item) => item.file_url || null;
 
   const formatUnit = (unit) => {
     if (!unit) return "Unit 1";
@@ -195,7 +192,6 @@ export default function SubjectDetails() {
     });
   };
 
-  // Navigate to upload page with context pre-filled via state
   const handleUploadMissing = (topicMeta, uploadType) => {
     navigate("/faculty/upload", {
       state: {
@@ -205,7 +201,7 @@ export default function SubjectDetails() {
           unit:     topicMeta.unit,
           year,
           semester: semester || "",
-          focusTab: uploadType, // "pdf" | "assessment"
+          focusTab: uploadType,
         },
       },
     });
@@ -398,14 +394,16 @@ export default function SubjectDetails() {
           downloadUrl={selectedAssessment.download_url}
           downloadLabel="Download File"
         >
-          {assessmentError ? (
-            <PreviewError fileUrl={selectedAssessment.file_url} downloadUrl={selectedAssessment.download_url} downloadLabel="Download File" />
-          ) : selectedAssessment.embed_url ? (
-            <iframe key={selectedAssessment.id} src={selectedAssessment.embed_url} title={selectedAssessment.title}
-              className="w-full h-full bg-white" allow="autoplay" onError={() => setAssessmentError(true)} style={{ border: "none" }} />
-          ) : (
-            <NoPreview fileUrl={selectedAssessment.file_url} />
-          )}
+          {/*
+            ↓ Replaces the old iframe + assessmentError block.
+              AssessmentPreviewContent auto-detects .xlsx / .docx / .txt from
+              the file_url and renders natively. PDFs and unknown types fall
+              back to an iframe exactly as before.
+          */}
+          <AssessmentPreviewContent
+            item={selectedAssessment}
+            onIframeError={() => setAssessmentError(true)}
+          />
         </ViewerModal>
       )}
     </div>
@@ -443,10 +441,9 @@ function VideoPlayer({ embedUrl, title, videoId, isBunny }) {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// TopicBlock — always shows all 3 slots; missing ones get an upload shortcut
+// TopicBlock
 // ─────────────────────────────────────────────────────────────────────────────
 function TopicBlock({ title, topicNumber, row, pal, onViewVideo, onViewPdf, onViewAssess, onDelete, onUploadMissing }) {
-  // Slot definitions — always rendered regardless of whether content exists
   const slots = [
     {
       type:      "video",
@@ -454,7 +451,6 @@ function TopicBlock({ title, topicNumber, row, pal, onViewVideo, onViewPdf, onVi
       label:     "Video",
       icon:      <PlayCircle size={13} />,
       onView:    onViewVideo,
-      // Videos can't be added from here (they need a file), so no upload shortcut
       canUpload: false,
       uploadTab: null,
       presentClass: "bg-[#EAF1FB] text-[#12376B] hover:bg-[#DCE8F8] border-[#D6E2F2]",
@@ -489,23 +485,18 @@ function TopicBlock({ title, topicNumber, row, pal, onViewVideo, onViewPdf, onVi
 
   return (
     <div className="px-5 py-2.5 border-b border-[#EEE5D8] last:border-b-0 hover:bg-[#FBF8F3] transition-colors">
-      {/* Single row: number + title on left, all action slots pinned to right */}
       <div className="flex items-center gap-3 min-w-0">
-        {/* Topic number badge */}
         <span className={`w-7 h-7 rounded-md ${pal.badgeBg} ${pal.badgeText} flex items-center justify-center text-[11px] font-extrabold flex-shrink-0`}>
           {String(topicNumber).padStart(2, "0")}
         </span>
 
-        {/* Topic title — grows to fill space, truncates if too long */}
         <h3 className="text-sm md:text-[14px] font-black text-[#0F172A] uppercase tracking-wide truncate flex-1 min-w-0">
           {title}
         </h3>
 
-        {/* Slots — always 3, pinned to right, each with equal width */}
         <div className="flex items-center gap-1.5 flex-shrink-0">
           {slots.map(({ type, item, label, icon, onView, canUpload, uploadTab, presentClass, missingClass, dividerColor }) => {
             if (item) {
-              // ── Uploaded — single pill: [icon + label | trash] ──
               return (
                 <div key={type} className={`flex items-center rounded-md border text-[11px] font-bold overflow-hidden w-[120px] ${presentClass}`}>
                   <button
@@ -527,7 +518,6 @@ function TopicBlock({ title, topicNumber, row, pal, onViewVideo, onViewPdf, onVi
               );
             }
 
-            // ── Missing ──
             return (
               <div key={type} className="w-[120px]">
                 {canUpload ? (
